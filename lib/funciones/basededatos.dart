@@ -1,0 +1,1065 @@
+import 'package:pov_suplementos/auth/autenticacion.dart';
+import 'package:pov_suplementos/estructuras/objeto.dart';
+import 'package:pov_suplementos/auth/modelo_usuario.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:path/path.dart' as path;
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+    
+enum OperacionInventario { agregar, restar, actualizar }
+
+class Basededatos {
+  static Database? _database;
+  static const String _databaseName = 'pov_suplementos.db';
+  static const int _databaseVersion = 3;
+
+  static Future<void> cerrarBaseDatos() async {
+    if (_database != null) {
+      await _database!.close();
+      _database = null;
+    }
+    print('Base de datos cerrada');
+  }
+
+  static Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _inicializarBD();
+    return _database!;
+  }
+
+  static Future<Database> _inicializarBD() async {
+    sqfliteFfiInit();
+    var directoriobd = await databaseFactoryFfi.getDatabasesPath();
+    String directorio = path.join(directoriobd, _databaseName);
+    
+    return await databaseFactoryFfi.openDatabase(
+      directorio,
+      options: OpenDatabaseOptions(
+        version: _databaseVersion,
+        onCreate: _crearTodasLasTablas,
+      ),
+    );
+  }
+
+ /// Crea todas las tablas necesarias en la base de datos
+  static Future<void> _crearTodasLasTablas(Database bd, int version) async {
+    print("creando tablas...");
+    await bd.execute('''
+      CREATE TABLE usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT NOT NULL UNIQUE,
+        contrasena TEXT NOT NULL,
+        rol INTEGER NOT NULL,
+        ultimo_acceso TEXT,
+        activo INTEGER NOT NULL DEFAULT 1
+      )
+    ''');
+    
+    // Tabla productos
+    await bd.execute('''
+      CREATE TABLE productos (
+        codigo TEXT PRIMARY KEY,
+        productoNombre TEXT NOT NULL,
+        marcaNombre TEXT NOT NULL,
+        descripcion TEXT,
+        precio REAL NOT NULL,
+        imagen TEXT,  
+        existencias INTEGER NOT NULL,
+        categoria TEXT NOT NULL DEFAULT 'snack'
+      )
+    ''');
+    
+    // Tabla ventas
+    await bd.execute('''
+      CREATE TABLE ventas (
+        codigo INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT NOT NULL,
+        total REAL NOT NULL,
+        subtotal REAL,
+        impuesto REAL DEFAULT 0,
+        descuento REAL DEFAULT 0,
+        usuario_id INTEGER NOT NULL,
+        metodo_pago TEXT DEFAULT 'efectivo',
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE RESTRICT
+      )
+    ''');
+    
+    // Tabla venta_objetos
+    await bd.execute('''
+      CREATE TABLE venta_objetos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ventaCodigo INTEGER NOT NULL,
+        productoCodigo TEXT NOT NULL,
+        cantidad INTEGER NOT NULL,
+        precio REAL NOT NULL,
+        FOREIGN KEY (ventaCodigo) REFERENCES ventas(codigo) ON DELETE CASCADE,
+        FOREIGN KEY (productoCodigo) REFERENCES productos(codigo) ON DELETE RESTRICT
+      )
+    ''');
+    
+    await bd.execute('''
+      CREATE TABLE reportes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo_reporte TEXT NOT NULL DEFAULT 'inventario',
+        creado_por INTEGER NOT NULL,
+        titulo TEXT NOT NULL,
+        descripcion TEXT,
+        fecha_creacion TEXT NOT NULL,
+        fecha_desde TEXT,
+        fecha_hasta TEXT,
+        estado TEXT NOT NULL DEFAULT 'generado',
+        FOREIGN KEY (creado_por) REFERENCES usuarios(id) ON DELETE RESTRICT
+      )
+    ''');
+
+    await bd.execute('''
+      CREATE TABLE reportes_inventario (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reporte_id INTEGER NOT NULL,
+        producto_id TEXT NOT NULL,
+        cantidad_anterior INTEGER NOT NULL,
+        cantidad_indicada INTEGER NOT NULL,
+        cantidad_real INTEGER NOT NULL,
+        motivo TEXT,
+        fecha_registro TEXT NOT NULL,
+        FOREIGN KEY (reporte_id) REFERENCES reportes(id) ON DELETE CASCADE,
+        FOREIGN KEY (producto_id) REFERENCES productos(codigo) ON DELETE RESTRICT
+      )
+    ''');
+
+
+
+    await _crearUsuarioAdmin(bd);
+  }
+
+
+
+
+
+  static Future <Map<String, dynamic>> obtenerUltimoReporte () async {
+    final db = await database;
+    
+    try {
+      final resultado = await db.query(
+        'reportes',
+        orderBy: 'fecha_creacion DESC',
+        limit: 1,
+      );
+
+      if (resultado.isEmpty) {
+        return {
+          'encontrado': false,
+          'mensaje': 'No se encontró ningún reporte'
+        };
+      }
+
+      return {
+        'encontrado': true,
+        'reporte': resultado.first,
+        'productos': await db.query(
+          'reportes_inventario',
+          where: 'reporte_id = ?',
+          whereArgs: [resultado.first['id']],
+        ),
+        'mensaje': 'Último reporte obtenido exitosamente',
+      };
+    } catch (e) {
+      return {
+        'encontrado': false,
+        'mensaje': 'Error al obtener último reporte: $e',
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> obtenerVentasCompletas({
+    DateTime? fechaDesde,
+    DateTime? fechaHasta,
+    int? usuarioId,
+    int limite = 100,
+  }) async {
+    final db = await database;
+    
+    try {
+      String whereClause = '1=1';
+      List<dynamic> whereArgs = [];
+      
+      if (fechaDesde != null) {
+        whereClause += ' AND v.fecha >= ?';
+        whereArgs.add(fechaDesde.toIso8601String());
+      }
+      
+      if (fechaHasta != null) {
+        whereClause += ' AND v.fecha <= ?';
+        whereArgs.add(fechaHasta.toIso8601String());
+      }
+      
+      if (usuarioId != null) {
+        whereClause += ' AND v.usuario_id = ?';
+        whereArgs.add(usuarioId);
+      }
+      
+      final resultado = await db.rawQuery('''
+        SELECT 
+          v.codigo, v.fecha, v.total, v.subtotal, v.impuesto, v.descuento,
+          v.metodo_pago, u.nombre as vendedor, u.rol as vendedor_rol,
+          vo.cantidad, vo.precio as precio_venta,
+          p.codigo as producto_codigo, p.productoNombre, p.marcaNombre, p.categoria
+        FROM ventas v
+        JOIN usuarios u ON v.usuario_id = u.id  
+        JOIN venta_objetos vo ON v.codigo = vo.ventaCodigo
+        JOIN productos p ON vo.productoCodigo = p.codigo
+        WHERE $whereClause
+        ORDER BY v.fecha DESC, v.codigo DESC
+        LIMIT ?
+      ''', [...whereArgs, limite]);
+      
+      return {
+        'exito': true,
+        'ventas': resultado,
+        'mensaje': 'Ventas completas obtenidas exitosamente',
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'ventas': [],
+        'mensaje': 'Error al obtener ventas completas: $e',
+      };
+    }
+  }
+
+
+  static Future<Map<String, dynamic>> verificarIntegridad() async {
+    final db = await database;
+    
+    try {
+      final problemas = <String>[];
+      
+      // Verificar ventas sin usuario válido
+      final ventasSinUsuario = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM ventas v 
+        LEFT JOIN usuarios u ON v.usuario_id = u.id
+        WHERE u.id IS NULL
+      ''');
+      
+      if ((ventasSinUsuario.first['count'] as int) > 0) {
+        problemas.add('${ventasSinUsuario.first['count']} ventas con usuario inválido');
+      }
+      
+      // Verificar venta_objetos sin producto válido  
+      final objetosSinProducto = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM venta_objetos vo
+        LEFT JOIN productos p ON vo.productoCodigo = p.codigo
+        WHERE p.codigo IS NULL
+      ''');
+      
+      if ((objetosSinProducto.first['count'] as int) > 0) {
+        problemas.add('${objetosSinProducto.first['count']} objetos de venta con producto inválido');
+      }
+      
+      // Verificar venta_objetos sin venta válida
+      final objetosSinVenta = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM venta_objetos vo
+        LEFT JOIN ventas v ON vo.ventaCodigo = v.codigo
+        WHERE v.codigo IS NULL
+      ''');
+      
+      if ((objetosSinVenta.first['count'] as int) > 0) {
+        problemas.add('${objetosSinVenta.first['count']} objetos de venta sin venta válida');
+      }
+      
+      return {
+        'exito': true,
+        'integra': problemas.isEmpty,
+        'problemas': problemas,
+        'mensaje': problemas.isEmpty 
+            ? 'La base de datos tiene integridad correcta'
+            : 'Se encontraron ${problemas.length} problemas de integridad',
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'integra': false,
+        'problemas': [],
+        'mensaje': 'Error verificando integridad: $e',
+      };
+    }
+  }
+
+
+  static Future<void> _crearUsuarioAdmin(Database bd) async {
+    const adminPassword = 'admin123'; // Cambiar en producción
+    final hashedPassword = _hashPassword(adminPassword);
+    
+    try {
+      await bd.insert(
+        'usuarios',
+        {
+          'nombre': 'admin',
+          'contrasena': hashedPassword,
+          'rol': RolUsuario.admin.id,
+          'activo': 1,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    } catch (e) {
+      print('Error creando usuario admin: $e');
+    }
+  }
+
+  /// Genera hash de la contraseña usando SHA-256
+  static String _hashPassword(String password) {
+    final bytes = utf8.encode(password);
+    final digest = sha256.convert(bytes);
+    return digest.toString();
+  }
+
+  /// Verifica si una contraseña coincide con su hash
+  static bool _verifyPassword(String password, String hashedPassword) {
+    return _hashPassword(password) == hashedPassword;
+  }
+
+
+  static Future<Map<String, dynamic>> crearUsuario(Usuario usuario) async {
+    final db = await database;
+    
+    try {
+      final existingUser = await buscarUsuarioPorNombre(usuario.nombre);
+      if (existingUser['encontrado'] == true) {
+        return {
+          'exito': false,
+          'mensaje': 'El nombre de usuario ya existe',
+        };
+      }
+
+      final usuarioConHasheada = usuario.copiarUsuario(
+        contrasena: _hashPassword(usuario.contrasena),
+      );
+
+      final id = await db.insert(
+        'usuarios',
+        usuarioConHasheada.aMapa(),
+        conflictAlgorithm: ConflictAlgorithm.abort,
+      );
+
+      return {
+        'exito': true,
+        'mensaje': 'Usuario creado exitosamente',
+        'usuarioId': id,
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al crear usuario: $e',
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> buscarUsuarioPorNombre(String nombre) async {
+    final db = await database;
+    
+    try {
+      final resultado = await db.query(
+        'usuarios',
+        where: 'nombre = ? AND activo = 1',
+        whereArgs: [nombre],
+        limit: 1,
+      );
+
+      if (resultado.isEmpty) {
+        return {
+          'encontrado': false,
+          'mensaje': 'Usuario no encontrado',
+        };
+      }
+
+      final usuario = Usuario.fromMap(resultado.first);
+      return {
+        'encontrado': true,
+        'usuario': usuario,
+        'mensaje': 'Usuario encontrado',
+      };
+    } catch (e) {
+      return {
+        'encontrado': false,
+        'mensaje': 'Error al buscar usuario: $e',
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> validarCredenciales(
+    String nombre, 
+    String contrasena,
+  ) async {
+    final db = await database;
+    
+    try {
+      final resultado = await db.query(
+        'usuarios',
+        where: 'nombre = ? AND activo = 1',
+        whereArgs: [nombre],
+        limit: 1,
+      );
+      
+      if (resultado.isEmpty) {
+        return {
+          'valido': false,
+          'mensaje': 'Usuario no encontrado',
+        };
+      }
+
+      final userData = resultado.first;
+      final hashedPassword = userData['contrasena'] as String;
+      
+      if (!_verifyPassword(contrasena, hashedPassword)) {
+        return {
+          'valido': false,
+          'mensaje': 'Contraseña incorrecta',
+        };
+      }
+
+      await _actualizarUltimoAcceso(userData['id'] as int);
+
+      final usuario = Usuario.fromMap(userData);
+      return {
+        'valido': true,
+        'usuario': usuario,
+        'mensaje': 'Credenciales válidas',
+      };
+    } catch (e) {
+      return {
+        'valido': false,
+        'mensaje': 'Error al validar credenciales: $e',
+      };
+    }
+  }
+
+  static Future<void> _actualizarUltimoAcceso(int userId) async {
+    final db = await database;
+    await db.update(
+      'usuarios',
+      {'ultimo_acceso': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+  }
+
+  /// Obtiene todos los usuarios (solo para administradores)
+  static Future<Map<String, dynamic>> obtenerTodosLosUsuarios() async {
+    final db = await database;
+    
+    try {
+      final resultado = await db.query(
+        'usuarios',
+        orderBy: 'nombre ASC',
+      );
+
+      final usuarios = resultado.map((userData) => Usuario.fromMap(userData)).toList();
+      
+      return {
+        'exito': true,
+        'usuarios': usuarios,
+        'mensaje': 'Usuarios obtenidos exitosamente',
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'usuarios': <Usuario>[],
+        'mensaje': 'Error al obtener usuarios: $e',
+      };
+    }
+  }
+
+  /// Desactiva un usuario (no lo elimina, solo lo marca como inactivo)
+  static Future<Map<String, dynamic>> desactivarUsuario(int usuarioId) async {
+    final db = await database;
+    
+    try {
+      final rowsAffected = await db.update(
+        'usuarios',
+        {'activo': 0},
+        where: 'id = ?',
+        whereArgs: [usuarioId],
+      );
+
+      if (rowsAffected == 0) {
+        return {
+          'exito': false,
+          'mensaje': 'Usuario no encontrado',
+        };
+      }
+
+      return {
+        'exito': true,
+        'mensaje': 'Usuario desactivado exitosamente',
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al desactivar usuario: $e',
+      };
+    }
+  }
+
+  /// Cambia la contraseña de un usuario
+  static Future<Map<String, dynamic>> cambiarContrasena(
+    int userId, 
+    String nuevaContrasena,
+  ) async {
+    final db = await database;
+    
+    try {
+      final hashedPassword = _hashPassword(nuevaContrasena);
+      
+      final rowsAffected = await db.update(
+        'usuarios',
+        {'contrasena': hashedPassword},
+        where: 'id = ? AND activo = 1',
+        whereArgs: [userId],
+      );
+
+      if (rowsAffected == 0) {
+        return {
+          'exito': false,
+          'mensaje': 'Usuario no encontrado o inactivo',
+        };
+      }
+
+      return {
+        'exito': true,
+        'mensaje': 'Contraseña actualizada exitosamente',
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al cambiar contraseña: $e',
+      };
+    }
+  }
+
+
+
+  /// Guarda una venta
+  static Future<Map<String, dynamic>> guardarVenta(
+    Map<String, dynamic> venta,
+    List<Map<String, dynamic>> objetos,
+  ) async {
+    if (objetos.isEmpty) {
+      return {
+        'exito': false,
+        'mensaje': 'No se pueden guardar ventas sin productos'
+      };
+    }
+
+    final db = await database;
+    
+    try {
+      return await db.transaction((txn) async {
+        for (final objeto in objetos) {
+          final producto = await txn.query(
+            'productos',
+            where: 'codigo = ?',
+            whereArgs: [objeto['productoCodigo']],
+            limit: 1,
+          );
+          
+          if (producto.isEmpty) {
+            throw Exception('Producto ${objeto['productoCodigo']} no encontrado');
+          }
+          
+          final disponible = producto.first['existencias'] as int;
+          final solicitado = objeto['cantidad'] as int;
+          
+          if (disponible < solicitado) {
+            throw Exception(
+              'Inventario insuficiente para producto ${objeto['productoCodigo']}. '
+              'Disponible: $disponible, Solicitado: $solicitado'
+            );
+          }
+        }
+        
+        // 2. Insertar venta
+        final ventaId = await txn.insert('ventas', {
+          'fecha': venta['fecha'] ?? DateTime.now().toIso8601String(),
+          'total': venta['total'] ?? 0.0,
+          'subtotal': venta['subtotal'] ?? venta['total'] ?? 0.0,
+          'impuesto': venta['impuesto'] ?? 0.0,
+          'descuento': venta['descuento'] ?? 0.0,
+          'usuario_id': venta['usuario_id'],
+          'metodo_pago': venta['metodo_pago'] ?? 'efectivo',
+        });
+        
+        for (final objeto in objetos) {
+          await txn.insert('venta_objetos', {
+            'ventaCodigo': ventaId,
+            'productoCodigo': objeto['productoCodigo'],
+            'cantidad': objeto['cantidad'],
+            'precio': objeto['precio'],
+          });
+          
+          await txn.rawUpdate(
+            'UPDATE productos SET existencias = existencias - ? WHERE codigo = ?',
+            [objeto['cantidad'], objeto['productoCodigo']]
+          );
+        }
+        
+        return {
+          'exito': true,
+          'mensaje': 'Venta guardada exitosamente con inventario actualizado',
+          'ventaId': ventaId,
+        };
+      });
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al guardar venta: $e',
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> obtenerVentas() async {
+    final db = await database;
+    try {
+      final ventas = await db.query('ventas');
+      final List<Map<String, dynamic>> resultado = [];
+
+      for (final venta in ventas) {
+        final items = await db.query(
+          'venta_objetos',
+          where: 'ventaCodigo = ?',
+          whereArgs: [venta['codigo']],
+        );
+        final v = Map<String, dynamic>.from(venta);
+        v['items'] = items;
+        resultado.add(v);
+      }
+
+      return {
+        'exito': true,
+        'mensaje': 'Ventas obtenidas',
+        'ventas': resultado,
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error obteniendo ventas: $e',
+        'ventas': [],
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> guardarProductos(
+    List<Map<String, dynamic>> productos,
+  ) async {
+    if (productos.isEmpty) {
+      return {
+        'exito': false,
+        'mensaje': 'Lista de productos vacia',
+        'elementos guardados': 0,
+      };
+    }
+
+    final db = await database;
+
+    List<String> err = [];
+    try {
+      await db.transaction((trans) async {
+        for (int i = 0; i < productos.length; i++) {
+          Map<String, dynamic> producto = productos[i];
+          if (!_validarProducto(producto)) {
+            err.add(
+              'Producto ${i + 1} no se pudo añadir. No tiene los campos validos',
+            );
+            continue;
+          }
+
+          await trans.insert(
+            'productos',
+            producto,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      });
+    } catch (e) {
+      err.add("DB: Error al guardar productos - $e");
+    }
+    return {
+      'exito': err.isEmpty,
+      'mensaje': err.isEmpty
+          ? 'Productos guardados exitosamente'
+          : 'Algunos productos no se pudieron guardar',
+      'elementos guardados': productos.length - err.length,
+      'errores': err,
+    };
+  }
+
+
+    static Future<Map<String, dynamic>> actualizarInventario( 
+    OperacionInventario operacion,
+    List<Map<String, dynamic>> productos,
+  ) async {
+    if (productos.isEmpty) {
+      return {
+        'exito': false,
+        'mensaje': 'Lista de productos vacía',
+      };
+    }
+
+    try {
+      final bd = await database;
+
+      return await bd.transaction((trans) async {
+        for (final producto in productos) {
+          final codigo = producto['productoCodigo'];
+          final cantidad = producto['cantidad'] ?? 0;
+
+          if (codigo == null) {
+            throw Exception('Código de producto requerido');
+          }
+
+          final productoActual = await trans.query(
+            'productos',
+            where: 'codigo = ?',
+            whereArgs: [codigo],
+            limit: 1,
+          );
+
+          if (productoActual.isEmpty) {
+            throw Exception('Producto con código $codigo no encontrado');
+          }
+
+          final existenciasActuales = productoActual.first['existencias'] as int;
+          int cantidadNueva;
+
+          switch (operacion) {
+            case OperacionInventario.agregar:
+              cantidadNueva = existenciasActuales + cantidad as int;
+              break;
+            case OperacionInventario.restar:
+              cantidadNueva = existenciasActuales - cantidad as int;
+              if (cantidadNueva < 0) {
+                throw Exception(
+                  'Inventario insuficiente para producto $codigo. '
+                  'Disponible: $existenciasActuales, Solicitado: $cantidad'
+                );
+              }
+              break;
+            case OperacionInventario.actualizar:
+              cantidadNueva = cantidad;
+              if (cantidadNueva < 0) {
+                throw Exception('La cantidad no puede ser negativa');
+              }
+              break;
+          }
+
+          await trans.update(
+            'productos',
+            {'existencias': cantidadNueva},
+            where: 'codigo = ?',
+            whereArgs: [codigo],
+          );
+        }
+
+        return {
+          'exito': true,
+          'mensaje': 'Inventario actualizado exitosamente',
+          'productos_actualizados': productos.length,
+        };
+      });
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al actualizar inventario: $e',
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> obtenerObjetos() async {
+    final db = await database;
+    return db
+        .query('productos')
+        .then((lista) {
+          return {
+            'exito': true,
+            'mensaje': 'Productos obtenidos exitosamente',
+            'productos': lista,
+          };
+        })
+        .catchError((e) {
+          return {
+            'exito': false,
+            'mensaje': 'Error al obtener productos: $e',
+            'productos': [],
+          };
+        });
+  }
+
+  static Future<Map<String, dynamic>> obtenerObjetoPorCodigo(String codigo) async {
+    final db = await database;
+    try {
+      final resultado = await db.query(
+        'productos',
+        where: 'codigo = ?',
+        whereArgs: [codigo],
+        limit: 1,
+      );
+
+      if (resultado.isEmpty) {
+        return {
+          'encontrado': false,
+          'mensaje': 'Producto no encontrado',
+        };
+      }
+
+      return {
+        'encontrado': true,
+        'producto': resultado.first,
+        'mensaje': 'Producto encontrado',
+      };
+    } catch (e) {
+      return {
+        'encontrado': false,
+        'mensaje': 'Error al buscar producto: $e',
+      };
+    }
+  }
+
+  /// Crea un nuevo reporte de inventario
+  static Future<Map<String, dynamic>> crearReporteInventario({
+    required int creadoPor,
+    required String titulo,
+    String? descripcion,
+    DateTime? fechaDesde,
+    DateTime? fechaHasta,
+  }) async {
+    final db = await database;
+    
+    try {
+      final reporteId = await db.insert('reportes', {
+        'tipo_reporte': 'inventario',
+        'creado_por': creadoPor,
+        'titulo': titulo,
+        'descripcion': descripcion,
+        'fecha_creacion': DateTime.now().toIso8601String(),
+        'fecha_desde': fechaDesde?.toIso8601String(),
+        'fecha_hasta': fechaHasta?.toIso8601String(),
+        'estado': 'generado',
+      });
+
+      return {
+        'exito': true,
+        'reporteId': reporteId,
+        'mensaje': 'Reporte de inventario creado exitosamente',
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al crear reporte: $e',
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> agregarDetalleReporte({
+    required int reporteId,
+    required String productoId,
+    required int cantidadAnterior,
+    required int cantidadActual,
+    String? motivo,
+  }) async {
+    final db = await database;
+    
+    try {
+      final diferencia = cantidadActual - cantidadAnterior;
+      
+      await db.insert('reportes_inventario', {
+        'reporte_id': reporteId,
+        'producto_id': productoId,
+        'cantidad_anterior': cantidadAnterior,
+        'cantidad_actual': cantidadActual,
+        'diferencia': diferencia,
+        'motivo': motivo,
+        'fecha_registro': DateTime.now().toIso8601String(),
+      });
+
+      return {
+        'exito': true,
+        'mensaje': 'Detalle agregado al reporte',
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al agregar detalle: $e',
+      };
+    }
+  }
+
+  /// Genera un reporte completo de inventario actual
+  static Future<Map<String, dynamic>> generarReporteInventarioCompleto({
+    required int creadoPor,
+    String titulo = 'Reporte de Inventario',
+  }) async {
+    final db = await database;
+    
+    try {
+      return await db.transaction((txn) async {
+        final reporteId = await txn.insert('reportes', {
+          'tipo_reporte': 'inventario',
+          'creado_por': creadoPor,
+          'titulo': titulo,
+          'descripcion': 'Reporte automático de todo el inventario',
+          'fecha_creacion': DateTime.now().toIso8601String(),
+          'estado': 'generado',
+        });
+
+        final productos = await txn.query('productos');
+        
+        for (final producto in productos) {
+          final cantidadActual = producto['existencias'] as int;
+          
+          await txn.insert('reportes_inventario', {
+            'reporte_id': reporteId,
+            'producto_id': producto['codigo'],
+            'cantidad_anterior': cantidadActual, 
+            'cantidad_actual': cantidadActual,
+            'diferencia': 0,
+            'motivo': 'Inventario actual',
+            'fecha_registro': DateTime.now().toIso8601String(),
+          });
+        }
+
+        return {
+          'exito': true,
+          'reporteId': reporteId,
+          'productosIncluidos': productos.length,
+          'mensaje': 'Reporte de inventario completo generado exitosamente',
+        };
+      });
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al generar reporte: $e',
+      };
+    }
+  }
+
+  /// Obtiene un reporte con todos sus detalles
+  static Future<Map<String, dynamic>> obtenerReporteCompleto(int reporteId) async {
+    final db = await database;
+    
+    try {
+      final reporteInfo = await db.rawQuery('''
+        SELECT r.*, u.nombre as creador_nombre
+        FROM reportes r
+        JOIN usuarios u ON r.creado_por = u.id
+        WHERE r.id = ?
+      ''', [reporteId]);
+
+      if (reporteInfo.isEmpty) {
+        return {
+          'exito': false,
+          'mensaje': 'Reporte no encontrado',
+        };
+      }
+
+      final detalles = await db.rawQuery('''
+        SELECT 
+          ri.*,
+          p.productoNombre,
+          p.marcaNombre,
+          p.categoria,
+          p.precio
+        FROM reportes_inventario ri
+        JOIN productos p ON ri.producto_id = p.codigo
+        WHERE ri.reporte_id = ?
+        ORDER BY ri.fecha_registro ASC
+      ''', [reporteId]);
+
+      return {
+        'exito': true,
+        'reporte': reporteInfo.first,
+        'detalles': detalles,
+        'mensaje': 'Reporte obtenido exitosamente',
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al obtener reporte: $e',
+      };
+    }
+  }
+
+  /// Listado de reportes
+  static Future<Map<String, dynamic>> listarReportes({int? creadoPor}) async {
+    final db = await database;
+    
+    try {
+      String whereClause = '1=1';
+      List<dynamic> whereArgs = [];
+      
+      if (creadoPor != null) {
+        whereClause += ' AND r.creado_por = ?';
+        whereArgs.add(creadoPor);
+      }
+
+      final reportes = await db.rawQuery('''
+        SELECT 
+          r.*,
+          u.nombre as creador_nombre,
+          COUNT(ri.id) as total_productos
+        FROM reportes r
+        JOIN usuarios u ON r.creado_por = u.id
+        LEFT JOIN reportes_inventario ri ON r.id = ri.reporte_id
+        WHERE $whereClause
+        GROUP BY r.id
+        ORDER BY r.fecha_creacion DESC
+      ''', whereArgs);
+
+      return {
+        'exito': true,
+        'reportes': reportes,
+        'mensaje': 'Reportes obtenidos exitosamente',
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'reportes': [],
+        'mensaje': 'Error al obtener reportes: $e',
+      };
+    }
+  }
+
+  static bool _validarProducto(Map<String, dynamic> producto) {
+    return producto.containsKey('codigo') &&
+        producto.containsKey('productoNombre') &&
+        producto.containsKey('marcaNombre') &&
+        producto.containsKey('precio') &&
+        producto['codigo'] is String &&
+        producto['precio'] is num &&
+        producto['categoria'].toString().isNotEmpty &&
+        producto['productoNombre'].toString().isNotEmpty;
+  }
+
+  //Guarda una lista de objetos a partir de una lista de objetos Objeto
+  static Future<void> guardarProductosDeObjetos(List<Objeto> objetos) async {
+    final productos = objetos
+        .map(
+          (obj) => {
+            'codigo': obj.codigo,
+            'productoNombre': obj.productoNombre,
+            'marcaNombre': obj.marcaNombre,
+            'descripcion': obj.descripcion,
+            'precio': obj.precio,
+            'imagen': obj.imagen,
+            'categoria': obj.categoria,
+            'existencias': obj.existencias,
+          },
+        )
+        .toList();
+
+    final resultado= await guardarProductos(productos);
+    print(resultado);
+  }
+
+}

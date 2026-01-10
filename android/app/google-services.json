@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "741690976731",
+    "firebase_url": "https://possuplementos-default-rtdb.firebaseio.com",
+    "project_id": "possuplementos",
+    "storage_bucket": "possuplementos.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:741690976731:android:a9e53dea4e576a5dc79ffe",
+        "android_client_info": {
+          "package_name": "com.example.pov_suplementos"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCSbyQzw7l6A7Eh_SDGvSj-HyHZIxbaZZo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
