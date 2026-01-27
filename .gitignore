@@ -47,6 +47,32 @@ app.*.map.json
 # Firebase configuration files (contain sensitive keys)
 /android/app/google-services.json
 /ios/Runner/GoogleService-Info.plist
+/web/firebase-config.js
 
 # Custom executables
 /cositasdego/*.exe
+
+# Environment variables and sensitive config
+.env
+.env.local
+.env.production
+.env.staging
+config.json
+secrets.json
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup and temporary files
+*.bak
+*.tmp
+.backup/
+
+# IDE specific files
+*.code-workspace
+
+# Local development files
+local.properties
+keystore.properties

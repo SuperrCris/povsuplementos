@@ -36,7 +36,6 @@ class _GestorDeSesionState extends State<GestorDeSesion> {
     super.initState();
     _usuarioActual = _autenticacion.usuarioActual;
     
-    // Escuchar cambios en el estado de autenticación
     _autenticacion.userStream.listen((user) {
       if (mounted) {
         setState(() {

@@ -1,27 +1,14 @@
-/// Script de inicialización para crear usuarios de ejemplo
-/// 
-/// Este archivo ayuda a poblar la base de datos con usuarios iniciales
-/// para probar el sistema de autenticación.
 
-import 'package:pov_suplementos/auth/autenticacion.dart';
 import 'package:pov_suplementos/auth/modelo_usuario.dart';
 import 'package:pov_suplementos/funciones/basededatos.dart';
 
-class DatabaseSeeder {
-  static final Autenticacion _authService = Autenticacion();
-  
-  /// Crea usuarios de ejemplo para testing
+class DBSemillero {
+
   static Future<void> createSampleUsers() async {
-    print('🚀 Inicializando usuarios de ejemplo...');
-    
-    // Primero, verificar qué usuarios ya existen
-    await listAllUsers();
-    
-    // Verificar si admin existe y crearlo si no
+    await listarTodosLosUsuarios();
     await ensureAdminExists();
     
     try {
-      // Crear usuario cajero solo si no existe
       final existingCajero = await Basededatos.buscarUsuarioPorNombre('cajero');
       if (!existingCajero['encontrado']) {
         final cajeroResult = await Basededatos.crearUsuario(
@@ -67,8 +54,6 @@ class DatabaseSeeder {
       print('👤 supervisor (contraseña: super123)    - Rol: Supervisor');
       print('\n🎉 Inicialización completada!\n');
       
-      // Probar autenticación del admin
-      await testAuthenticationForUser('admin', 'admin123');
       
     } catch (e) {
       print('❌ Error durante la inicialización: $e');
@@ -102,7 +87,7 @@ class DatabaseSeeder {
   }
   
   /// Lista todos los usuarios existentes
-  static Future<void> listAllUsers() async {
+  static Future<void> listarTodosLosUsuarios() async {
     try {
       final result = await Basededatos.obtenerTodosLosUsuarios();
       
@@ -128,35 +113,6 @@ class DatabaseSeeder {
     }
   }
   
-  /// Prueba el sistema de autenticación para un usuario específico
-  static Future<void> testAuthenticationForUser(String username, String password) async {
-    print('🧪 Probando login para $username...');
-    
-    final result = await _authService.login(username, password);
-    
-    if (result.exito) {
-      print('✅ Login exitoso: $username - Rol: ${result.usuario!.rol.nombre}');
-      _authService.cerrarSesion(); // Cerrar sesión para próxima prueba
-    } else {
-      print('❌ Login fallido: $username - ${result.  mensaje}');
-    }
-  }
 
-  /// Prueba el sistema de autenticación
-  static Future<void> testAuthentication() async {
-    print('🧪 Probando sistema de autenticación...\n');
-    
-    final testUsers = [
-      {'username': 'admin', 'password': 'admin123'},
-      {'username': 'cajero', 'password': 'caja123'},
-      {'username': 'supervisor', 'password': 'super123'},
-      {'username': 'usuario_falso', 'password': 'password123'},
-    ];
-    
-    for (final testUser in testUsers) {
-      await testAuthenticationForUser(testUser['username']!, testUser['password']!);
-    }
-    
-    print('\n🎉 Pruebas de autenticación completadas!\n');
-  }
+
 }

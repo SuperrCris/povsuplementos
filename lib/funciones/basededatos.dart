@@ -11,7 +11,7 @@ enum OperacionInventario { agregar, restar, actualizar }
 class Basededatos {
   static Database? _database;
   static const String _databaseName = 'pov_suplementos.db';
-  static const int _databaseVersion = 3;
+  static const int _databaseVersion = 6;
 
   static Future<void> cerrarBaseDatos() async {
     if (_database != null) {
@@ -37,8 +37,30 @@ class Basededatos {
       options: OpenDatabaseOptions(
         version: _databaseVersion,
         onCreate: _crearTodasLasTablas,
+        onUpgrade: _migrarBaseDatos,
       ),
     );
+  }
+
+  /// Maneja las migraciones de base de datos entre versiones
+  static Future<void> _migrarBaseDatos(Database bd, int versionAntigua, int versionNueva) async {
+    print("Migrando base de datos de versión $versionAntigua a $versionNueva");
+    
+    // Migración de versión 4 a 5: agregar columna 'activo' a productos
+    if (versionAntigua < 5) {
+      await bd.execute('''
+        ALTER TABLE productos ADD COLUMN activo INTEGER NOT NULL DEFAULT 1
+      ''');
+      print("Columna 'activo' agregada a tabla productos");
+    }
+    
+    // Migración de versión 5 a 6: agregar columna 'sucursal' a productos
+    if (versionAntigua < 6) {
+      await bd.execute('''
+        ALTER TABLE productos ADD COLUMN sucursal INTEGER NOT NULL DEFAULT 1
+      ''');
+      print("Columna 'sucursal' agregada a tabla productos");
+    }
   }
 
  /// Crea todas las tablas necesarias en la base de datos
@@ -65,7 +87,9 @@ class Basededatos {
         precio REAL NOT NULL,
         imagen TEXT,  
         existencias INTEGER NOT NULL,
-        categoria TEXT NOT NULL DEFAULT 'snack'
+        categoria TEXT NOT NULL DEFAULT 'snack',
+        activo INTEGER NOT NULL DEFAULT 1,
+        sucursal INTEGER NOT NULL DEFAULT 1
       )
     ''');
     
@@ -171,126 +195,9 @@ class Basededatos {
     }
   }
 
-  static Future<Map<String, dynamic>> obtenerVentasCompletas({
-    DateTime? fechaDesde,
-    DateTime? fechaHasta,
-    int? usuarioId,
-    int limite = 100,
-  }) async {
-    final db = await database;
-    
-    try {
-      String whereClause = '1=1';
-      List<dynamic> whereArgs = [];
-      
-      if (fechaDesde != null) {
-        whereClause += ' AND v.fecha >= ?';
-        whereArgs.add(fechaDesde.toIso8601String());
-      }
-      
-      if (fechaHasta != null) {
-        whereClause += ' AND v.fecha <= ?';
-        whereArgs.add(fechaHasta.toIso8601String());
-      }
-      
-      if (usuarioId != null) {
-        whereClause += ' AND v.usuario_id = ?';
-        whereArgs.add(usuarioId);
-      }
-      
-      final resultado = await db.rawQuery('''
-        SELECT 
-          v.codigo, v.fecha, v.total, v.subtotal, v.impuesto, v.descuento,
-          v.metodo_pago, u.nombre as vendedor, u.rol as vendedor_rol,
-          vo.cantidad, vo.precio as precio_venta,
-          p.codigo as producto_codigo, p.productoNombre, p.marcaNombre, p.categoria
-        FROM ventas v
-        JOIN usuarios u ON v.usuario_id = u.id  
-        JOIN venta_objetos vo ON v.codigo = vo.ventaCodigo
-        JOIN productos p ON vo.productoCodigo = p.codigo
-        WHERE $whereClause
-        ORDER BY v.fecha DESC, v.codigo DESC
-        LIMIT ?
-      ''', [...whereArgs, limite]);
-      
-      return {
-        'exito': true,
-        'ventas': resultado,
-        'mensaje': 'Ventas completas obtenidas exitosamente',
-      };
-    } catch (e) {
-      return {
-        'exito': false,
-        'ventas': [],
-        'mensaje': 'Error al obtener ventas completas: $e',
-      };
-    }
-  }
-
-
-  static Future<Map<String, dynamic>> verificarIntegridad() async {
-    final db = await database;
-    
-    try {
-      final problemas = <String>[];
-      
-      // Verificar ventas sin usuario válido
-      final ventasSinUsuario = await db.rawQuery('''
-        SELECT COUNT(*) as count
-        FROM ventas v 
-        LEFT JOIN usuarios u ON v.usuario_id = u.id
-        WHERE u.id IS NULL
-      ''');
-      
-      if ((ventasSinUsuario.first['count'] as int) > 0) {
-        problemas.add('${ventasSinUsuario.first['count']} ventas con usuario inválido');
-      }
-      
-      // Verificar venta_objetos sin producto válido  
-      final objetosSinProducto = await db.rawQuery('''
-        SELECT COUNT(*) as count
-        FROM venta_objetos vo
-        LEFT JOIN productos p ON vo.productoCodigo = p.codigo
-        WHERE p.codigo IS NULL
-      ''');
-      
-      if ((objetosSinProducto.first['count'] as int) > 0) {
-        problemas.add('${objetosSinProducto.first['count']} objetos de venta con producto inválido');
-      }
-      
-      // Verificar venta_objetos sin venta válida
-      final objetosSinVenta = await db.rawQuery('''
-        SELECT COUNT(*) as count
-        FROM venta_objetos vo
-        LEFT JOIN ventas v ON vo.ventaCodigo = v.codigo
-        WHERE v.codigo IS NULL
-      ''');
-      
-      if ((objetosSinVenta.first['count'] as int) > 0) {
-        problemas.add('${objetosSinVenta.first['count']} objetos de venta sin venta válida');
-      }
-      
-      return {
-        'exito': true,
-        'integra': problemas.isEmpty,
-        'problemas': problemas,
-        'mensaje': problemas.isEmpty 
-            ? 'La base de datos tiene integridad correcta'
-            : 'Se encontraron ${problemas.length} problemas de integridad',
-      };
-    } catch (e) {
-      return {
-        'exito': false,
-        'integra': false,
-        'problemas': [],
-        'mensaje': 'Error verificando integridad: $e',
-      };
-    }
-  }
-
 
   static Future<void> _crearUsuarioAdmin(Database bd) async {
-    const adminPassword = 'admin123'; // Cambiar en producción
+    const adminPassword = 'admin123';
     final hashedPassword = _hashPassword(adminPassword);
     
     try {
@@ -309,14 +216,12 @@ class Basededatos {
     }
   }
 
-  /// Genera hash de la contraseña usando SHA-256
   static String _hashPassword(String password) {
     final bytes = utf8.encode(password);
     final digest = sha256.convert(bytes);
     return digest.toString();
   }
 
-  /// Verifica si una contraseña coincide con su hash
   static bool _verifyPassword(String password, String hashedPassword) {
     return _hashPassword(password) == hashedPassword;
   }
@@ -779,7 +684,7 @@ class Basededatos {
   static Future<Map<String, dynamic>> obtenerObjetos() async {
     final db = await database;
     return db
-        .query('productos')
+        .query('productos', where: 'activo = 1')
         .then((lista) {
           return {
             'exito': true,
@@ -944,6 +849,25 @@ class Basededatos {
     }
   }
 
+  ///Obtener objetos por sucursal
+  static Future<Map<String, dynamic>> obtenerObjetosPorSucursal(int sucursal) async{
+    final bd = await database;
+
+    try{
+      final objetos = await bd.rawQuery('''
+      Select * from productos where sucursal = ?
+      ''', [sucursal]);
+      return {'productos': objetos};
+    }
+    catch (e){
+      return {
+        'exito': false,
+        'mensaje': 'No se pudieron obtener los objetos por sucursal: $e'
+      };
+    }
+
+  }
+
   /// Obtiene un reporte con todos sus detalles
   static Future<Map<String, dynamic>> obtenerReporteCompleto(int reporteId) async {
     final db = await database;
@@ -1060,6 +984,87 @@ class Basededatos {
 
     final resultado= await guardarProductos(productos);
     print(resultado);
+  }
+
+  /// Desactiva productos (soft delete) en lugar de eliminarlos
+  static Future<Map<String, dynamic>> desactivarProductos(List<String> codigos) async {
+    final db = await database;
+    try {
+      int productosAfectados = 0;
+      await db.transaction((txn) async {
+        for (final codigo in codigos) {
+          final rowsAffected = await txn.update(
+            'productos',
+            {'activo': 0},
+            where: 'codigo = ?',
+            whereArgs: [codigo],
+          );
+          productosAfectados += rowsAffected;
+        }
+      });
+      
+      return {
+        'exito': true,
+        'mensaje': 'Productos desactivados exitosamente',
+        'productos_desactivados': productosAfectados,
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al desactivar productos: $e',
+        'productos_desactivados': 0,
+      };
+    }
+  }
+
+  /// Reactiva productos previamente desactivados
+  static Future<Map<String, dynamic>> reactivarProductos(List<String> codigos) async {
+    final db = await database;
+    try {
+      int productosAfectados = 0;
+      await db.transaction((txn) async {
+        for (final codigo in codigos) {
+          final rowsAffected = await txn.update(
+            'productos',
+            {'activo': 1},
+            where: 'codigo = ?',
+            whereArgs: [codigo],
+          );
+          productosAfectados += rowsAffected;
+        }
+      });
+      
+      return {
+        'exito': true,
+        'mensaje': 'Productos reactivados exitosamente',
+        'productos_reactivados': productosAfectados,
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al reactivar productos: $e',
+        'productos_reactivados': 0,
+      };
+    }
+  }
+
+  /// MANTENER para casos excepcionales donde realmente necesites eliminar
+  static Future<void> eliminarProductos(List<String> codigos) async {
+    final db = await database;
+    try {
+      await db.transaction((txn) async {
+        for (final codigo in codigos) {
+          await txn.delete(
+            'productos',
+            where: 'codigo = ?',
+            whereArgs: [codigo],
+          );
+        }
+      });
+      print('Productos eliminados exitosamente');
+    } catch (e) {
+      print('Error al eliminar productos: $e');
+    }
   }
 
 }

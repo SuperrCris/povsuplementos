@@ -78,7 +78,6 @@ class _ElementoCompraState extends State<ElementoCompra>
                 
                 SizedBox(width: 12),
                 
-                // Product info
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

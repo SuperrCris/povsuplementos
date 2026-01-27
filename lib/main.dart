@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:pov_suplementos/estructuras/objeto.dart';
 import 'package:pov_suplementos/funciones/basededatos.dart';
 import 'package:pov_suplementos/funciones/descargarimagenes.dart';
+import 'package:pov_suplementos/funciones/gestor_imagenes.dart';
 import 'package:pov_suplementos/funciones/obtenerimagenes.dart';
 import 'package:pov_suplementos/widgets/agregarobjeto.dart';
 import 'package:pov_suplementos/widgets/botonesbusqueda.dart';
@@ -10,6 +11,7 @@ import 'package:pov_suplementos/widgets/botonusuario.dart';
 import 'package:pov_suplementos/widgets/busquedasucursales.dart';
 import 'package:pov_suplementos/widgets/carritodecompras.dart';
 import 'package:pov_suplementos/widgets/conexiones.dart';
+import 'package:pov_suplementos/widgets/inventario.dart';
 import 'package:pov_suplementos/widgets/ventanacompra.dart';
 import 'package:pov_suplementos/widgets/ventanareportes.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -17,19 +19,19 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 // Importaciones del sistema de autenticación
 import 'package:pov_suplementos/auth/gestorsesion.dart';
 import 'package:pov_suplementos/auth/iniciopagina.dart';
-import 'package:pov_suplementos/auth/database_seeder.dart';
+import 'package:pov_suplementos/auth/BD_semillero.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
-  await Basededatos.database;  
-  await DatabaseSeeder.createSampleUsers();
-  
+  await Basededatos.database;
+  await DBSemillero.createSampleUsers();
+
   runApp(MyApp());
 }
 
 class MyApp extends StatefulWidget {
-  final Map<String, dynamic> config = {"tema": ThemeMode.light, "sucursal": 3};
+  final Map<String, dynamic> config = {"tema": ThemeMode.light, "sucursal": 1};
 
   MyApp({super.key});
 
@@ -59,10 +61,7 @@ class _MyAppState extends State<MyApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: [
-        Locale('es', 'ES'),
-        Locale('en', 'US'),
-      ],
+      supportedLocales: [Locale('es', 'ES'), Locale('en', 'US')],
 
       theme: ThemeData(
         hoverColor: Colors.blue.shade50,
@@ -72,7 +71,7 @@ class _MyAppState extends State<MyApp> {
           seedColor: Colors.blue.shade300,
           brightness: Brightness.light,
         ),
-        
+
         primarySwatch: Colors.blue,
         appBarTheme: AppBarTheme(
           backgroundColor: Colors.blue.shade300,
@@ -151,11 +150,10 @@ class _MyAppState extends State<MyApp> {
         iconTheme: IconThemeData(color: Colors.blue.shade300),
       ),
       themeMode: _themeMode,
-      
+
       home: GestorDeSesion(
         paginaDeInicioBuilder: () => const Iniciopagina(),
-        alExpirarSesion: () {
-        },
+        alExpirarSesion: () {},
         child: HomeScreen(
           onThemeToggle: toggleTheme,
           currentThemeMode: _themeMode,
@@ -184,19 +182,24 @@ class _HomeScreenState extends State<HomeScreen> {
   Database? db;
 
   final CarritoControlador _carritoController = CarritoControlador();
-  final GlobalKey<RefreshIndicatorState> _refreshKey = GlobalKey<RefreshIndicatorState>();
+  final GlobalKey<RefreshIndicatorState> _refreshKey =
+      GlobalKey<RefreshIndicatorState>();
   late Future<List<Objeto>> _productosFuture;
-
-  Future<Image> loadImage() async {
-    await Future.delayed(const Duration(seconds: 2));
-    return Image.network('https://via.placeholder.com/150');
-  }
+  
+  final TextEditingController _searchController = TextEditingController();
+  String _filtroTexto = '';
 
   @override
   void initState() {
     super.initState();
     _productosFuture = obtenerInfo();
     _carritoController.setRefreshCallback(_actualizarTablaProductos);
+    
+    _searchController.addListener(() {
+      setState(() {
+        _filtroTexto = _searchController.text.toLowerCase();
+      });
+    });
   }
 
   void _agregarAlCarrito(Objeto objeto) {
@@ -212,6 +215,12 @@ class _HomeScreenState extends State<HomeScreen> {
     _carritoController.agregarAlCarrito(objeto);
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _actualizarTablaProductos() async {
     setState(() {
       _productosFuture = obtenerInfo();
@@ -224,25 +233,27 @@ class _HomeScreenState extends State<HomeScreen> {
     final images = await obtenerTodasLasImagenes('activos');
 
     final productos = await Basededatos.obtenerObjetos();
-    for (var _producto in productos['productos']) {
-      print(_producto);
+    for (var producto in productos['productos']) {
+      print(producto);
       Objeto objetoactual = Objeto(
-        codigo: _producto['codigo'],
-        productoNombre: _producto['productoNombre'],
-        marcaNombre: _producto['marcaNombre'],
-        descripcion: _producto['descripcion'] ?? '',
-        precio: (_producto['precio']?.toDouble()) ?? 0.0,
-        imagen: _producto['imagen']?? '',
-        categoria: _producto['categoria'],
-        existencias: _producto['existencias'],
+        codigo: producto['codigo'],
+        productoNombre: producto['productoNombre'],
+        marcaNombre:  producto['marcaNombre'],
+        descripcion: producto['descripcion'] ?? '',
+        precio: (producto['precio']?.toDouble()) ?? 0.0,
+        imagen: producto['imagen'] ?? '',
+        categoria: producto['categoria'],
+        existencias: producto['existencias'],
+        activo: producto['activo'] ?? false,
       );
       for (var imageFile in images) {
-        if (_producto['imagen'] != null && imageFile.path.contains(_producto['imagen'])) {
+        if (producto['imagen'] != null &&
+            imageFile.path.contains(producto['imagen'])) {
           objetoactual.imagenWidget = Image.file(imageFile, fit: BoxFit.cover);
           break;
         } else {
           print(
-            "no hubo imagen para el objeto: ${_producto['productoNombre']}",
+            "no hubo imagen para el objeto: ${producto['productoNombre']}",
           );
         }
       }
@@ -251,13 +262,24 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       objetos.add(objetoactual);
     }
-
-    await Future.delayed(Duration(seconds: 1));
     return objetos;
+  }
+
+  List<Objeto> _filtrarProductos(List<Objeto> productos) {
+    if (_filtroTexto.isEmpty) {
+      return productos;
+    }
+    
+    return productos.where((producto) {
+      return producto.codigo.toLowerCase().contains(_filtroTexto) ||
+             producto.productoNombre.toLowerCase().contains(_filtroTexto) ||
+             producto.marcaNombre.toLowerCase().contains(_filtroTexto);
+    }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
+    GestorImagenes.listarImagenes();
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
@@ -283,51 +305,43 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             height: 50,
             width: double.infinity,
-            child: Expanded(
-              flex: 2,
-              child: Row(
-               
-                children: [
-                  SizedBox(width: 10),
-                  Text(
-                    'SUPLEMENTOS BEG',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                      fontSize: 24,
-                    ),
-                  ),
-                Expanded(child: SizedBox()),
-                  Expanded(
-  
-                    child: Row(
-                      spacing: 10,
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        // Información del usuario actual
 
-                        // Tiempo restante de sesión
-                        //SessionTimeoutWidget(),
-                        IconButton(
-                          onPressed: widget.onThemeToggle,
-                          icon: Icon(
-                            widget.currentThemeMode == ThemeMode.dark
-                                ? Icons.light_mode
-                                : Icons.dark_mode,
-                            color: Colors.white,
-                          ),
-                          tooltip: widget.currentThemeMode == ThemeMode.dark
-                              ? 'Cambiar a modo claro'
-                              : 'Cambiar a modo oscuro',
-                        ),
-                        widgetConexiones(),
-                        BotonUsuario(),
-                        SizedBox(width: 10),
-                      ],
-                    ),
+            child: Row(
+              children: [
+                SizedBox(width: 10),
+                Text(
+                  'SUPLEMENTOS BEG',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                    fontSize: 24,
                   ),
-                ],
-              ),
+                ),
+                Expanded(child: SizedBox()),
+                Expanded(
+                  child: Row(
+                    spacing: 10,
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        onPressed: widget.onThemeToggle,
+                        icon: Icon(
+                          widget.currentThemeMode == ThemeMode.dark
+                              ? Icons.light_mode
+                              : Icons.dark_mode,
+                          color: Colors.white,
+                        ),
+                        tooltip: widget.currentThemeMode == ThemeMode.dark
+                            ? 'Cambiar a modo claro'
+                            : 'Cambiar a modo oscuro',
+                      ),
+                      widgetConexiones(),
+                      BotonUsuario(),
+                      SizedBox(width: 10),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -347,8 +361,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
-                                      builder: (context) => Reporte(tipo: TipoReporte.ultimoreporte,),
-                                    ),
+                                      builder: (context) =>Inventario() ),
                                   );
                                 },
                                 child: Container(
@@ -360,8 +373,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                     borderRadius: BorderRadius.circular(45),
                                     gradient: LinearGradient(
                                       colors: [
-                                        Color.fromARGB(255, 23, 161, 57),
                                         Color.fromARGB(255, 1, 204, 45),
+                                        Color.fromARGB(255, 23, 161, 57),
                                       ],
                                       stops: [0, 1],
                                       begin: Alignment.topCenter,
@@ -369,7 +382,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                   ),
                                   child: Text(
-                                    '👍 Reporte inicial',
+                                    '📄 Inventario',
                                     style: TextStyle(
                                       color: Colors.white,
                                       fontWeight: FontWeight.w800,
@@ -378,7 +391,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
                               GestureDetector(
-                                onTap: () {},
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => Reporte(
+                                        tipo: TipoReporte.ultimoreporte,
+                                      ),
+                                    ),
+                                  );
+                                },
                                 child: Container(
                                   padding: EdgeInsets.symmetric(
                                     horizontal: 8.0,
@@ -397,7 +419,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                   ),
                                   child: Text(
-                                    '⌛ Reporte final',
+                                    '📖 Reporte',
                                     style: TextStyle(
                                       color: Colors.white,
                                       fontWeight: FontWeight.w800,
@@ -405,14 +427,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               ),
-                              ElevatedButton(onPressed: () {
-                                showDialog(
-                                  context: context,
-                                  builder: (context) => Agregarobjeto(alTenerExito: () {
-                                    _actualizarTablaProductos();
-                                  },),
-                                );
-                              }, child: Text('+'))
+                              ElevatedButton(
+                                onPressed: () {
+                                  showDialog(
+                                    context: context,
+                                    builder: (context) => Agregarobjeto(
+                                      alTenerExito: () {
+                                        _actualizarTablaProductos();
+                                      },
+                                    ),
+                                  );
+                                },
+                                child: Text('+'),
+                              ),
                             ],
                           ),
                         ),
@@ -426,6 +453,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               height: 60,
                               padding: EdgeInsets.all(8.0),
                               child: TextField(
+                                controller: _searchController,
                                 decoration: InputDecoration(
                                   filled: true,
                                   fillColor: Colors.blue.shade50,
@@ -450,7 +478,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       width: 2.5,
                                     ),
                                   ),
-                                  labelText: 'Buscar productos...',
+                                  labelText: 'Buscar por código, nombre o marca...',
                                   labelStyle: TextStyle(
                                     color: Colors.blue.shade600,
                                     fontWeight: FontWeight.w500,
@@ -459,6 +487,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                     Icons.search,
                                     color: Colors.blue.shade600,
                                   ),
+                                  suffixIcon: _filtroTexto.isNotEmpty
+                                      ? IconButton(
+                                          icon: Icon(
+                                            Icons.clear,
+                                            color: Colors.blue.shade600,
+                                          ),
+                                          onPressed: () {
+                                            _searchController.clear();
+                                          },
+                                        )
+                                      : null,
                                   contentPadding: EdgeInsets.symmetric(
                                     horizontal: 20,
                                     vertical: 16,
@@ -468,13 +507,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                   color: Colors.blue.shade800,
                                   fontSize: 16,
                                 ),
-                                onChanged: (value) {
-                            
-                                },
                               ),
                             ),
                           ),
-                          Busquedasucursales(),
+                      //    Busquedasucursales(),
                           SizedBox(width: 10),
                         ],
                       ),
@@ -482,7 +518,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       SizedBox(height: 5),
                       Divider(height: 2, color: Colors.blue.shade100),
                       Expanded(
-                        flex: 2,
+                        flex: 3,
                         child: RefreshIndicator(
                           key: _refreshKey,
                           onRefresh: _actualizarTablaProductos,
@@ -491,7 +527,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             builder: (context, snapshot) {
                               if (snapshot.connectionState ==
                                   ConnectionState.waiting) {
-                                return Center(child: CircularProgressIndicator());
+                                return Center(
+                                  child: CircularProgressIndicator(),
+                                );
                               } else if (snapshot.hasError) {
                                 return Center(
                                   child: Text(
@@ -502,13 +540,41 @@ class _HomeScreenState extends State<HomeScreen> {
                                   snapshot.data!.isEmpty) {
                                 return Center(child: Text('No hay productos'));
                               } else {
+                                final productosFiltrados = _filtrarProductos(snapshot.data!);
+                                
+                                if (productosFiltrados.isEmpty && _filtroTexto.isNotEmpty) {
+                                  return Center(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.search_off,
+                                          size: 64,
+                                          color: Colors.grey,
+                                        ),
+                                        SizedBox(height: 16),
+                                        Text(
+                                          'No se encontraron productos\ncon "$_filtroTexto"',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                                
                                 return Padding(
                                   padding: const EdgeInsets.all(8.0),
                                   child: GridView.builder(
                                     gridDelegate:
                                         SliverGridDelegateWithFixedCrossAxisCount(
                                           crossAxisCount:
-                                              MediaQuery.of(context).size.width >
+                                              MediaQuery.of(
+                                                    context,
+                                                  ).size.width >
                                                   300
                                               ? MediaQuery.of(
                                                       context,
@@ -519,12 +585,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                           mainAxisSpacing: 8.0,
                                           childAspectRatio: 0.6,
                                         ),
-                                    itemCount: snapshot.data!.length,
+                                    itemCount: productosFiltrados.length,
                                     itemBuilder: (context, index) {
-                                      final objeto = snapshot.data![index];
-                                      return widgetVenta(
+                                      final objeto = productosFiltrados[index];
+                                      return WidgetVenta(
                                         objeto: objeto,
-                                        callback: () => _agregarAlCarrito(objeto),
+                                        callback: () =>
+                                            _agregarAlCarrito(objeto),
                                       );
                                     },
                                   ),

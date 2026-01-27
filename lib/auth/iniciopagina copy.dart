@@ -139,47 +139,45 @@ class _IniciopaginaState extends State<Iniciopagina> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final size = MediaQuery.of(context).size;
+    final isTablet = size.width > 600;
 
     return Scaffold(
-      backgroundColor:  Colors.blue,
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: EdgeInsets.all(24.0),
-            child: Container(
-              padding: EdgeInsets.all(24.0),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 20,
-                    offset: const Offset(0, 10),
+            padding: EdgeInsets.all(isTablet ? 48.0 : 24.0),
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: SlideTransition(
+                position: _slideAnimation,
+                child: Container(
+                  constraints: BoxConstraints(
+                    maxWidth: isTablet ? 400 : double.infinity,
                   ),
-                ],
-              color:theme.scaffoldBackgroundColor,
-              ),
-              constraints: BoxConstraints(
-                maxWidth: size.width < 500 ? size.width : 400,
-              ),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _cabecera(theme),
-                    SizedBox(height: 32),
-                    _txfUsuario(),
-                    const SizedBox(height: 16),
-                    _txfContrasena(),
-                    const SizedBox(height: 24),
-                    _btnIniciarSesion(),
-                    if (_mensajeError != null) ...[
-                      const SizedBox(height: 16),
-                      _msjError(),
-                    ],
-                    const SizedBox(height: 32),
-                  ],
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildHeader(theme, isTablet),
+                        SizedBox(height: isTablet ? 48 : 32),
+                        _buildUsernameField(),
+                        const SizedBox(height: 16),
+                        _buildPasswordField(),
+                        const SizedBox(height: 8),
+                        _buildForgotPassword(),
+                        const SizedBox(height: 24),
+                        _buildLoginButton(),
+                        if (_mensajeError != null) ...[
+                          const SizedBox(height: 16),
+                          _buildErrorMessage(),
+                        ],
+                        const SizedBox(height: 32),
+                        _buildSystemInfo(),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -190,12 +188,12 @@ class _IniciopaginaState extends State<Iniciopagina> with SingleTickerProviderSt
   }
 
   /// Construye el header con logo y título
-  Widget _cabecera(ThemeData theme) {
+  Widget _buildHeader(ThemeData theme, bool isTablet) {
     return Column(
       children: [
         Container(
-          width: 100,
-          height: 100,
+          width: isTablet ? 120 : 100,
+          height: isTablet ? 120 : 100,
           decoration: BoxDecoration(
             color: theme.primaryColor,
             borderRadius: BorderRadius.circular(20),
@@ -209,26 +207,33 @@ class _IniciopaginaState extends State<Iniciopagina> with SingleTickerProviderSt
           ),
           child: Icon(
             Icons.store,
-            size: 50,
+            size: isTablet ? 60 : 50,
             color: Colors.white,
           ),
         ),
-        SizedBox(height:  16),
+        SizedBox(height: isTablet ? 24 : 16),
         Text(
           'Suplementos BEG',
           style: theme.textTheme.headlineMedium?.copyWith(
             fontWeight: FontWeight.bold,
             color: theme.primaryColor,
-            fontSize: 24,
+            fontSize: isTablet ? 28 : 24,
           ),
         ),
-        SizedBox(height:8),
+        SizedBox(height: isTablet ? 12 : 8),
+        Text(
+          'Sistema Punto de Venta',
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: theme.textTheme.bodyLarge?.color?.withOpacity(0.7),
+            fontSize: isTablet ? 18 : 16,
+          ),
+        ),
       ],
     );
   }
 
   /// Construye el campo de usuario
-  Widget _txfUsuario() {
+  Widget _buildUsernameField() {
     return TextFormField(
       controller: _usernameController,
       validator: _validateUsername,
@@ -252,7 +257,7 @@ class _IniciopaginaState extends State<Iniciopagina> with SingleTickerProviderSt
   }
 
   /// Construye el campo de contraseña
-  Widget _txfContrasena() {
+  Widget _buildPasswordField() {
     return TextFormField(
       controller: _passwordController,
       validator: _validatePassword,
@@ -288,10 +293,26 @@ class _IniciopaginaState extends State<Iniciopagina> with SingleTickerProviderSt
   }
 
   /// Construye el texto de "Olvidé mi contraseña"
+  Widget _buildForgotPassword() {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: TextButton(
+        onPressed: _cargando ? null : () {
+          _showForgotPasswordDialog();
+        },
+        child: Text(
+          '¿Olvidaste tu contraseña?',
+          style: TextStyle(
+            color: Theme.of(context).primaryColor,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
 
 
-
-  Widget _btnIniciarSesion() {
+  Widget _buildLoginButton() {
     return ElevatedButton(
       onPressed: _cargando ? null : _handleLogin,
       style: ElevatedButton.styleFrom(
@@ -323,7 +344,7 @@ class _IniciopaginaState extends State<Iniciopagina> with SingleTickerProviderSt
   }
 
   /// Construye el mensaje de error
-  Widget _msjError() {
+  Widget _buildErrorMessage() {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -353,4 +374,46 @@ class _IniciopaginaState extends State<Iniciopagina> with SingleTickerProviderSt
     );
   }
 
+  /// Construye la información del sistema
+  Widget _buildSystemInfo() {
+    return Column(
+      children: [
+        const Divider(),
+        const SizedBox(height: 16),
+        Text(
+          'Usuario por defecto: admin',
+          style: TextStyle(
+            color: Theme.of(context).textTheme.bodySmall?.color,
+            fontSize: 12,
+          ),
+        ),
+        Text(
+          'Contraseña por defecto: admin123',
+          style: TextStyle(
+            color: Theme.of(context).textTheme.bodySmall?.color,
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Muestra el diálogo de contraseña olvidada
+  void _showForgotPasswordDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Contraseña Olvidada'),
+        content: const Text(
+          'Para recuperar tu contraseña, contacta al administrador del sistema.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
+    );
+  }
 }

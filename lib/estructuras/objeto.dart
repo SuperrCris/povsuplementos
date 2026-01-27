@@ -8,6 +8,7 @@ class Objeto {
   final double precio;
   final String imagen;
   final int existencias;
+  final bool activo;
   final String? categoria;
   late Image? imagenWidget;
 
@@ -20,6 +21,7 @@ class Objeto {
     required this.precio,
     required this.imagen,
     required this.existencias,
+    required this.activo,
     this.categoria,
     this.imagenWidget,
   });

@@ -131,6 +131,14 @@ class ReporteState extends State<Reporte> {
                         Checkbox(value: true, onChanged: (value) {}),
                       ],
                     ),
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          // Lógica para generar el reporte con las fechas seleccionadas
+                        });
+                      },
+                      child: Icon(Icons.refresh),
+                    ),
                   ],
                 ),
               ),
@@ -270,9 +278,10 @@ class ReporteState extends State<Reporte> {
     return {};
   }
 
+
+  
   Widget _reporteNoEncontrado() {
-    return Expanded(
-      child: Center(
+    return Center(
         child: Column(
           spacing: 10,
           mainAxisAlignment: MainAxisAlignment.center,
@@ -289,7 +298,6 @@ class ReporteState extends State<Reporte> {
             ),
           ],
         ),
-      ),
     );
   }
 }

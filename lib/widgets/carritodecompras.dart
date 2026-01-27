@@ -4,7 +4,6 @@ import 'package:pov_suplementos/auth/modelo_usuario.dart';
 import 'package:pov_suplementos/estructuras/objeto.dart';
 import 'package:pov_suplementos/widgets/cuadroobjetocarrito.dart';
 import 'package:pov_suplementos/widgets/ventanametodopago.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class ItemCarrito {
   final Objeto producto;
