@@ -398,7 +398,7 @@ class _BotonUsuarioState extends State<BotonUsuario> {
     );
   }
 
-  /// Muestra diálogo de gestión de usuarios (solo admin)
+
   void _showUsersDialog(BuildContext context) {
     showDialog(
       context: context,

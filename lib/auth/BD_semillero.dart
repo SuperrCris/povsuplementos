@@ -4,9 +4,9 @@ import 'package:pov_suplementos/funciones/basededatos.dart';
 
 class DBSemillero {
 
-  static Future<void> createSampleUsers() async {
+  static Future<void> crearUsuariosDefecto() async {
     await listarTodosLosUsuarios();
-    await ensureAdminExists();
+    await verSiAdminExiste();
     
     try {
       final existingCajero = await Basededatos.buscarUsuarioPorNombre('cajero');
@@ -61,10 +61,10 @@ class DBSemillero {
   }
   
   /// Asegura que el usuario admin exista
-  static Future<void> ensureAdminExists() async {
+  static Future<void> verSiAdminExiste() async {
     try {
-      final adminCheck = await Basededatos.buscarUsuarioPorNombre('admin');
-      if (!adminCheck['encontrado']) {
+      final hayAdmin = await Basededatos.buscarUsuarioPorNombre('admin');
+      if (!hayAdmin['encontrado']) {
         print('⚠️ Usuario admin no encontrado, creándolo...');
         final result = await Basededatos.crearUsuario(
           Usuario(

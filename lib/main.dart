@@ -14,6 +14,7 @@ import 'package:pov_suplementos/widgets/conexiones.dart';
 import 'package:pov_suplementos/widgets/inventario.dart';
 import 'package:pov_suplementos/widgets/ventanacompra.dart';
 import 'package:pov_suplementos/widgets/ventanareportes.dart';
+import 'package:pov_suplementos/widgets/ventanaterminalpago.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 // Importaciones del sistema de autenticación
@@ -25,7 +26,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
   await Basededatos.database;
-  await DBSemillero.createSampleUsers();
+  await DBSemillero.crearUsuariosDefecto();
 
   runApp(MyApp());
 }
@@ -42,6 +43,10 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   late ThemeMode _themeMode = widget.config["tema"];
   late int sucursal = widget.config["sucursal"];
+
+
+
+
 
   void toggleTheme() {
     setState(() {
@@ -188,12 +193,21 @@ class _HomeScreenState extends State<HomeScreen> {
   
   final TextEditingController _searchController = TextEditingController();
   String _filtroTexto = '';
-
+  
+  Future<bool> ventanaTerminalPago(BuildContext context, double total) async {
+    final resultado = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (context) => PagoTerminal(total: total)),
+    );
+    return resultado ?? false;
+  }
+  
   @override
   void initState() {
     super.initState();
     _productosFuture = obtenerInfo();
     _carritoController.setRefreshCallback(_actualizarTablaProductos);
+    _carritoController.setTerminalPagoCallback(() => ventanaTerminalPago(context, _carritoController.total));
     
     _searchController.addListener(() {
       setState(() {
@@ -244,7 +258,7 @@ class _HomeScreenState extends State<HomeScreen> {
         imagen: producto['imagen'] ?? '',
         categoria: producto['categoria'],
         existencias: producto['existencias'],
-        activo: producto['activo'] ?? false,
+        activo: producto['activo'] == 1  ? true : false,
       );
       for (var imageFile in images) {
         if (producto['imagen'] != null &&
@@ -352,8 +366,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       Padding(
                         padding: const EdgeInsets.all(8.0),
-                        child: Flexible(
-                          child: Row(
+                        child: Row(
                             spacing: 10,
                             children: [
                               GestureDetector(
@@ -442,7 +455,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ],
                           ),
-                        ),
                       ),
                       SizedBox(height: 2),
                       Divider(height: 2, color: Colors.blue.shade100),
@@ -517,6 +529,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       BotonesBusqueda(),
                       SizedBox(height: 5),
                       Divider(height: 2, color: Colors.blue.shade100),
+
+                      //Lista de productos
                       Expanded(
                         flex: 3,
                         child: RefreshIndicator(
@@ -565,6 +579,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                   );
                                 }
+
                                 
                                 return Padding(
                                   padding: const EdgeInsets.all(8.0),

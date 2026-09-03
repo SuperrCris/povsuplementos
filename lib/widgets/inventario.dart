@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:pov_suplementos/estructuras/objeto.dart';
 import 'package:pov_suplementos/funciones/basededatos.dart';
+import 'package:pov_suplementos/widgets/agregarexistencias.dart';
+import 'package:pov_suplementos/widgets/agregarobjeto.dart';
 
 
 List<String> seleccionados = [];
@@ -81,12 +83,16 @@ Accion accionActual = Accion.ver;
 
   void _ajustarStock(Objeto objeto) {
     print('Ajustar stock de: ${objeto.productoNombre}');
-    // Implementa la lógica para ajustar el stock
+                             showDialog(context: context, builder: (context) => ActualizarExistencias(codigo: int.tryParse(objeto.codigo) ?? -1, cantidad: objeto.existencias, alTenerExito: () {
+                            setState(() {
+                              _productosFuture = obtenerInfo();
+                            });
+                          }));
+    
   }
 
   void _verHistorial(Objeto objeto) {
     print('Ver historial de: ${objeto.productoNombre}');
-    // Implementa la lógica para ver el historial
   } 
   TextEditingController controladorBusqueda = TextEditingController();
 
@@ -147,6 +153,8 @@ Accion accionActual = Accion.ver;
             mainAxisAlignment: MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+
+              // Barra de busqueda, botones de restar, ver y añadir. Selector de sucursal
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -187,6 +195,27 @@ Accion accionActual = Accion.ver;
                     });
 
                   }, child: Icon(accionActual == Accion.ver ? Icons.delete : Icons.visibility, size: 30,)),
+
+                  //Boton de añadir
+                   
+                   
+                 ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      shape: CircleBorder(),
+                      padding: EdgeInsets.all(10),
+                    ),
+                    onPressed: ()  {
+                    setState(() {
+                      if (accionActual == Accion.eliminar ) {
+                        accionActual = Accion.ver;
+                      } 
+                    }
+                    );
+
+                  _mostrarDialogoAgregarObjeto();
+
+                  }, child: Icon(Icons.add)),
                 ],
               ),
               SizedBox(height: 20),
@@ -282,6 +311,7 @@ Accion accionActual = Accion.ver;
                               Text('Ajustar stock'),
                             ],
                           ),
+
                         ),
                         PopupMenuItem<String>(
                           value: 'historial',
@@ -326,6 +356,34 @@ Accion accionActual = Accion.ver;
     ),);
   }
 
+  void _mostrarDialogoAgregarObjeto() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Agregarobjeto(
+          alTenerExito: () {
+            setState(() {
+              _productosFuture = obtenerInfo();
+            });
+          },
+        );
+      },
+    );
+  }
+    void _mostrarDialogoAgregarExistencias() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Agregarobjeto(
+          alTenerExito: () {
+            setState(() {
+              _productosFuture = obtenerInfo();
+            });
+          },
+        );
+      },
+    );
+  }
 
    
 Widget SelectorSucursal(BuildContext context, Map<int, dynamic> sucursales) {

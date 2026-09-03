@@ -1048,6 +1048,37 @@ class Basededatos {
     }
   }
 
+
+    /// Reactiva productos previamente desactivados
+  static Future<Map<String, dynamic>> actualizarExistencias(int codigo, int cantidad, OperacionInventario operacion) async {
+    final bd = await database;
+    try {
+      if (operacion == OperacionInventario.restar) {
+        cantidad = -cantidad;
+      }
+     await bd.transaction((tns) async {
+
+      await tns.rawUpdate('''
+        UPDATE productos
+        SET existencias = 
+        ${operacion == OperacionInventario.actualizar ? '?' : 'existencias + ?'}
+          WHERE codigo = ?
+          ''', [cantidad, codigo]);});
+      return {
+        'exito': true,
+        'mensaje': 'Existencias agregadas exitosamente',
+        'cantidad_agregada': cantidad,
+        
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al agregar existencias: $e',
+        'cantidad_agregada': 0,
+      };
+    }
+  }
+
   /// MANTENER para casos excepcionales donde realmente necesites eliminar
   static Future<void> eliminarProductos(List<String> codigos) async {
     final db = await database;

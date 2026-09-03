@@ -7,6 +7,7 @@ import 'package:pov_suplementos/widgets/ventanametodopago.dart';
 
 class ItemCarrito {
   final Objeto producto;
+
   int cantidad; 
   ItemCarrito({required this.producto, this.cantidad = 1,});
 
@@ -15,12 +16,14 @@ class ItemCarrito {
 }
 
 class CarritoControlador {
+
   _EstadoWidgetCarritoCompra? _estado;
   VoidCallback? _refreshCallback;
+  Future<bool> Function()? _terminalPagoCallback;
 
   
-  void _atarEstado(_EstadoWidgetCarritoCompra state) {
-    _estado = state;
+  void _atarEstado(_EstadoWidgetCarritoCompra estado) {
+    _estado = estado;
   }
   
   void _quitarEstado() {
@@ -29,6 +32,10 @@ class CarritoControlador {
   
   void setRefreshCallback(VoidCallback callback) {
     _refreshCallback = callback;
+  }
+
+  void setTerminalPagoCallback(Future<bool> Function() callback) {
+    _terminalPagoCallback = callback;
   }
   
   void agregarAlCarrito(Objeto producto) {
@@ -124,10 +131,7 @@ class _EstadoWidgetCarritoCompra extends State<WidgetCarritoCompra>  with RolReq
                 ),
             ],
           ),
-          
           Divider(),
-          
-          // Cart content
           Expanded(
             child: carrito.isEmpty 
               ? _listaSinProductos()
@@ -344,16 +348,7 @@ class _EstadoWidgetCarritoCompra extends State<WidgetCarritoCompra>  with RolReq
         carrito.add(ItemCarrito(producto: producto));
       }
     });
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${producto.productoNombre} agregado al carrito'),
-          duration: Duration(seconds: 2),
-          backgroundColor: Colors.green,
-        ),
-      );
-    }
+
   }
 
   void _eliminarDelCarrito(int index) {
@@ -384,14 +379,6 @@ class _EstadoWidgetCarritoCompra extends State<WidgetCarritoCompra>  with RolReq
       carrito.clear();
     });
     
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Carrito limpiado'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
   }
 
   void _procesarVenta() {
@@ -419,6 +406,7 @@ class _EstadoWidgetCarritoCompra extends State<WidgetCarritoCompra>  with RolReq
           onVentaProcesada: () {
             widget.controller?._onVentaProcesada();
           },
+          onTerminalPago: () async => await widget.controller?._terminalPagoCallback?.call() ?? false,
         ),
       ),
     );
