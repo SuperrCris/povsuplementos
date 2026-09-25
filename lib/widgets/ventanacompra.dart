@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:pov_suplementos/estructuras/objeto.dart';
-import 'package:pov_suplementos/funciones/gestor_imagenes.dart';
 
 class WidgetVenta extends StatelessWidget {
   final void Function() callback;
@@ -22,60 +21,20 @@ class WidgetVenta extends StatelessWidget {
             child: Center(
               child: ClipRRect(
                 borderRadius: BorderRadius.vertical(top: Radius.circular(8.0)),
-                child: 
-                FutureBuilder<ImageProvider?>(
-                  future: GestorImagenes.obtenerImageProvider(objeto.imagen), 
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return CircularProgressIndicator();
-                    } else if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
-                      return Container(
-                        width: double.infinity,
-                        height: double.infinity,
-                        color: Colors.grey[200],
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.image_not_supported, size: 50, color: Colors.grey[400]),
-                            SizedBox(height: 8),
-                            Text(
-                              'Sin imagen',
-                              style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      );
-                    } else {
-                      return Image(
-                        image: snapshot.data!,
+                child: objeto.imagenWidget != null
+                    ? Image(
+                        image: objeto.imagenWidget!.image,
                         fit: BoxFit.cover,
                         width: double.infinity,
                         height: double.infinity,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            width: double.infinity,
-                            height: double.infinity,
-                            color: Colors.grey[200],
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.broken_image, size: 50, color: Colors.grey[400]),
-                                SizedBox(height: 8),
-                                Text(
-                                  'Error al cargar',
-                                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      );
-                    }
-                  },
-                ),
+                        errorBuilder: (context, error, stackTrace) =>
+                            _imagenNoDisponible('Error al cargar'),
+                      )
+                    : _imagenNoDisponible('Sin imagen'),
               ),
             ),
           ),
+
           Expanded(
             flex: 3,
             child: Padding(
@@ -175,5 +134,24 @@ class WidgetVenta extends StatelessWidget {
     );
 
 
+  }
+
+  Widget _imagenNoDisponible(String mensaje) {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: Colors.grey[200],
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.image_not_supported, size: 50, color: Colors.grey[400]),
+          SizedBox(height: 8),
+          Text(
+            mensaje,
+            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+          ),
+        ],
+      ),
+    );
   }
 }

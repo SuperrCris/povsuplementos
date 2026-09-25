@@ -10,7 +10,7 @@ class Objeto {
   final int existencias;
   final bool activo;
   final String? categoria;
-  late Image? imagenWidget;
+  Image? imagenWidget;
 
   Objeto(
     {

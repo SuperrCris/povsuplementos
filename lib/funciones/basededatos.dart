@@ -5,13 +5,82 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart' as path;
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
-    
+
 enum OperacionInventario { agregar, restar, actualizar }
 
 class Basededatos {
   static Database? _database;
   static const String _databaseName = 'pov_suplementos.db';
-  static const int _databaseVersion = 6;
+  static const int _databaseVersion = 8;
+
+  static final List<Map<String, dynamic>> _productosIniciales = [
+    {
+      'codigo': 'SUP-WHEY-001',
+      'productoNombre': 'Proteina Whey 2 kg',
+      'marcaNombre': 'Muscletech',
+      'descripcion':
+          'Proteina de suero para apoyar la recuperacion y el crecimiento muscular.',
+      'precio': 1299.0,
+      'imagen': 'mtnitrotechwhey.png',
+      'existencias': 15,
+      'categoria': 'proteina',
+    },
+    {
+      'codigo': 'SUP-CREA-001',
+      'productoNombre': 'Creatina Monohidratada 300 g',
+      'marcaNombre': 'Universal Nutrition',
+      'descripcion':
+          'Creatina monohidratada para mejorar el rendimiento y la fuerza.',
+      'precio': 499.0,
+      'imagen': 'creatina-monohidratada.jpg',
+      'existencias': 20,
+      'categoria': 'creatina',
+    },
+    {
+      'codigo': 'SUP-PREE-001',
+      'productoNombre': 'Pre-entreno 30 servicios',
+      'marcaNombre': 'Psychotic',
+      'descripcion':
+          'Formula pre-entreno para energia, enfoque y rendimiento durante la sesion.',
+      'precio': 649.0,
+      'imagen': 'inspsychoticrojo.png',
+      'existencias': 12,
+      'categoria': 'pre-entreno',
+    },
+    {
+      'codigo': 'SUP-GANA-001',
+      'productoNombre': 'Mass Gainer 3 kg',
+      'marcaNombre': 'Mutant',
+      'descripcion':
+          'Suplemento hipercalorico para apoyar el aumento de masa muscular.',
+      'precio': 899.0,
+      'imagen': 'mass-gainer.jpg',
+      'existencias': 10,
+      'categoria': 'ganador de peso',
+    },
+    {
+      'codigo': 'SUP-BCAA-001',
+      'productoNombre': 'BCAA 2:1:1 300 g',
+      'marcaNombre': 'Scivation',
+      'descripcion':
+          'Aminoacidos esenciales para complementar la recuperacion post-entrenamiento.',
+      'precio': 579.0,
+      'imagen': 'bcaa.jpg',
+      'existencias': 14,
+      'categoria': 'aminoacidos',
+    },
+    {
+      'codigo': 'SUP-OMEGA-001',
+      'productoNombre': 'Omega 3 100 capsulas',
+      'marcaNombre': 'NOW Foods',
+      'descripcion':
+          'Capsulas de aceite de pescado como complemento para una dieta equilibrada.',
+      'precio': 329.0,
+      'imagen': 'omega-3.jpg',
+      'existencias': 25,
+      'categoria': 'salud y bienestar',
+    },
+  ];
 
   static Future<void> cerrarBaseDatos() async {
     if (_database != null) {
@@ -31,7 +100,7 @@ class Basededatos {
     sqfliteFfiInit();
     var directoriobd = await databaseFactoryFfi.getDatabasesPath();
     String directorio = path.join(directoriobd, _databaseName);
-    
+
     return await databaseFactoryFfi.openDatabase(
       directorio,
       options: OpenDatabaseOptions(
@@ -43,9 +112,13 @@ class Basededatos {
   }
 
   /// Maneja las migraciones de base de datos entre versiones
-  static Future<void> _migrarBaseDatos(Database bd, int versionAntigua, int versionNueva) async {
+  static Future<void> _migrarBaseDatos(
+    Database bd,
+    int versionAntigua,
+    int versionNueva,
+  ) async {
     print("Migrando base de datos de versión $versionAntigua a $versionNueva");
-    
+
     // Migración de versión 4 a 5: agregar columna 'activo' a productos
     if (versionAntigua < 5) {
       await bd.execute('''
@@ -53,7 +126,7 @@ class Basededatos {
       ''');
       print("Columna 'activo' agregada a tabla productos");
     }
-    
+
     // Migración de versión 5 a 6: agregar columna 'sucursal' a productos
     if (versionAntigua < 6) {
       await bd.execute('''
@@ -61,9 +134,35 @@ class Basededatos {
       ''');
       print("Columna 'sucursal' agregada a tabla productos");
     }
+
+    if (versionAntigua < 7) {
+      await bd.delete('reportes_inventario');
+      await bd.delete('venta_objetos');
+      await bd.delete('productos');
+      await _insertarProductosIniciales(bd);
+      print('Catalogo de suplementos actualizado');
+    }
+
+    if (versionAntigua < 8) {
+      final imagenesPorCodigo = {
+        'SUP-CREA-001': 'creatina-monohidratada.jpg',
+        'SUP-GANA-001': 'mass-gainer.jpg',
+        'SUP-BCAA-001': 'bcaa.jpg',
+        'SUP-OMEGA-001': 'omega-3.jpg',
+      };
+      for (final entrada in imagenesPorCodigo.entries) {
+        await bd.update(
+          'productos',
+          {'imagen': entrada.value},
+          where: 'codigo = ?',
+          whereArgs: [entrada.key],
+        );
+      }
+      print('Imagenes del catalogo de suplementos actualizadas');
+    }
   }
 
- /// Crea todas las tablas necesarias en la base de datos
+  /// Crea todas las tablas necesarias en la base de datos
   static Future<void> _crearTodasLasTablas(Database bd, int version) async {
     print("creando tablas...");
     await bd.execute('''
@@ -76,7 +175,7 @@ class Basededatos {
         activo INTEGER NOT NULL DEFAULT 1
       )
     ''');
-    
+
     // Tabla productos
     await bd.execute('''
       CREATE TABLE productos (
@@ -92,7 +191,7 @@ class Basededatos {
         sucursal INTEGER NOT NULL DEFAULT 1
       )
     ''');
-    
+
     // Tabla ventas
     await bd.execute('''
       CREATE TABLE ventas (
@@ -107,7 +206,7 @@ class Basededatos {
         FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE RESTRICT
       )
     ''');
-    
+
     // Tabla venta_objetos
     await bd.execute('''
       CREATE TABLE venta_objetos (
@@ -120,7 +219,7 @@ class Basededatos {
         FOREIGN KEY (productoCodigo) REFERENCES productos(codigo) ON DELETE RESTRICT
       )
     ''');
-    
+
     await bd.execute('''
       CREATE TABLE reportes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,18 +250,19 @@ class Basededatos {
       )
     ''');
 
-
-
     await _crearUsuarioAdmin(bd);
+    await _insertarProductosIniciales(bd);
   }
 
+  static Future<void> _insertarProductosIniciales(Database bd) async {
+    for (final producto in _productosIniciales) {
+      await bd.insert('productos', producto);
+    }
+  }
 
-
-
-
-  static Future <Map<String, dynamic>> obtenerUltimoReporte () async {
+  static Future<Map<String, dynamic>> obtenerUltimoReporte() async {
     final db = await database;
-    
+
     try {
       final resultado = await db.query(
         'reportes',
@@ -173,7 +273,7 @@ class Basededatos {
       if (resultado.isEmpty) {
         return {
           'encontrado': false,
-          'mensaje': 'No se encontró ningún reporte'
+          'mensaje': 'No se encontró ningún reporte',
         };
       }
 
@@ -195,22 +295,17 @@ class Basededatos {
     }
   }
 
-
   static Future<void> _crearUsuarioAdmin(Database bd) async {
     const adminPassword = 'admin123';
     final hashedPassword = _hashPassword(adminPassword);
-    
+
     try {
-      await bd.insert(
-        'usuarios',
-        {
-          'nombre': 'admin',
-          'contrasena': hashedPassword,
-          'rol': RolUsuario.admin.id,
-          'activo': 1,
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      await bd.insert('usuarios', {
+        'nombre': 'admin',
+        'contrasena': hashedPassword,
+        'rol': RolUsuario.admin.id,
+        'activo': 1,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
     } catch (e) {
       print('Error creando usuario admin: $e');
     }
@@ -226,17 +321,13 @@ class Basededatos {
     return _hashPassword(password) == hashedPassword;
   }
 
-
   static Future<Map<String, dynamic>> crearUsuario(Usuario usuario) async {
     final db = await database;
-    
+
     try {
       final existingUser = await buscarUsuarioPorNombre(usuario.nombre);
       if (existingUser['encontrado'] == true) {
-        return {
-          'exito': false,
-          'mensaje': 'El nombre de usuario ya existe',
-        };
+        return {'exito': false, 'mensaje': 'El nombre de usuario ya existe'};
       }
 
       final usuarioConHasheada = usuario.copiarUsuario(
@@ -255,16 +346,15 @@ class Basededatos {
         'usuarioId': id,
       };
     } catch (e) {
-      return {
-        'exito': false,
-        'mensaje': 'Error al crear usuario: $e',
-      };
+      return {'exito': false, 'mensaje': 'Error al crear usuario: $e'};
     }
   }
 
-  static Future<Map<String, dynamic>> buscarUsuarioPorNombre(String nombre) async {
+  static Future<Map<String, dynamic>> buscarUsuarioPorNombre(
+    String nombre,
+  ) async {
     final db = await database;
-    
+
     try {
       final resultado = await db.query(
         'usuarios',
@@ -274,10 +364,7 @@ class Basededatos {
       );
 
       if (resultado.isEmpty) {
-        return {
-          'encontrado': false,
-          'mensaje': 'Usuario no encontrado',
-        };
+        return {'encontrado': false, 'mensaje': 'Usuario no encontrado'};
       }
 
       final usuario = Usuario.fromMap(resultado.first);
@@ -287,19 +374,16 @@ class Basededatos {
         'mensaje': 'Usuario encontrado',
       };
     } catch (e) {
-      return {
-        'encontrado': false,
-        'mensaje': 'Error al buscar usuario: $e',
-      };
+      return {'encontrado': false, 'mensaje': 'Error al buscar usuario: $e'};
     }
   }
 
   static Future<Map<String, dynamic>> validarCredenciales(
-    String nombre, 
+    String nombre,
     String contrasena,
   ) async {
     final db = await database;
-    
+
     try {
       final resultado = await db.query(
         'usuarios',
@@ -307,22 +391,16 @@ class Basededatos {
         whereArgs: [nombre],
         limit: 1,
       );
-      
+
       if (resultado.isEmpty) {
-        return {
-          'valido': false,
-          'mensaje': 'Usuario no encontrado',
-        };
+        return {'valido': false, 'mensaje': 'Usuario no encontrado'};
       }
 
       final userData = resultado.first;
       final hashedPassword = userData['contrasena'] as String;
-      
+
       if (!_verifyPassword(contrasena, hashedPassword)) {
-        return {
-          'valido': false,
-          'mensaje': 'Contraseña incorrecta',
-        };
+        return {'valido': false, 'mensaje': 'Contraseña incorrecta'};
       }
 
       await _actualizarUltimoAcceso(userData['id'] as int);
@@ -334,10 +412,7 @@ class Basededatos {
         'mensaje': 'Credenciales válidas',
       };
     } catch (e) {
-      return {
-        'valido': false,
-        'mensaje': 'Error al validar credenciales: $e',
-      };
+      return {'valido': false, 'mensaje': 'Error al validar credenciales: $e'};
     }
   }
 
@@ -354,15 +429,14 @@ class Basededatos {
   /// Obtiene todos los usuarios (solo para administradores)
   static Future<Map<String, dynamic>> obtenerTodosLosUsuarios() async {
     final db = await database;
-    
-    try {
-      final resultado = await db.query(
-        'usuarios',
-        orderBy: 'nombre ASC',
-      );
 
-      final usuarios = resultado.map((userData) => Usuario.fromMap(userData)).toList();
-      
+    try {
+      final resultado = await db.query('usuarios', orderBy: 'nombre ASC');
+
+      final usuarios = resultado
+          .map((userData) => Usuario.fromMap(userData))
+          .toList();
+
       return {
         'exito': true,
         'usuarios': usuarios,
@@ -380,7 +454,7 @@ class Basededatos {
   /// Desactiva un usuario (no lo elimina, solo lo marca como inactivo)
   static Future<Map<String, dynamic>> desactivarUsuario(int usuarioId) async {
     final db = await database;
-    
+
     try {
       final rowsAffected = await db.update(
         'usuarios',
@@ -390,34 +464,25 @@ class Basededatos {
       );
 
       if (rowsAffected == 0) {
-        return {
-          'exito': false,
-          'mensaje': 'Usuario no encontrado',
-        };
+        return {'exito': false, 'mensaje': 'Usuario no encontrado'};
       }
 
-      return {
-        'exito': true,
-        'mensaje': 'Usuario desactivado exitosamente',
-      };
+      return {'exito': true, 'mensaje': 'Usuario desactivado exitosamente'};
     } catch (e) {
-      return {
-        'exito': false,
-        'mensaje': 'Error al desactivar usuario: $e',
-      };
+      return {'exito': false, 'mensaje': 'Error al desactivar usuario: $e'};
     }
   }
 
   /// Cambia la contraseña de un usuario
   static Future<Map<String, dynamic>> cambiarContrasena(
-    int userId, 
+    int userId,
     String nuevaContrasena,
   ) async {
     final db = await database;
-    
+
     try {
       final hashedPassword = _hashPassword(nuevaContrasena);
-      
+
       final rowsAffected = await db.update(
         'usuarios',
         {'contrasena': hashedPassword},
@@ -426,25 +491,14 @@ class Basededatos {
       );
 
       if (rowsAffected == 0) {
-        return {
-          'exito': false,
-          'mensaje': 'Usuario no encontrado o inactivo',
-        };
+        return {'exito': false, 'mensaje': 'Usuario no encontrado o inactivo'};
       }
 
-      return {
-        'exito': true,
-        'mensaje': 'Contraseña actualizada exitosamente',
-      };
+      return {'exito': true, 'mensaje': 'Contraseña actualizada exitosamente'};
     } catch (e) {
-      return {
-        'exito': false,
-        'mensaje': 'Error al cambiar contraseña: $e',
-      };
+      return {'exito': false, 'mensaje': 'Error al cambiar contraseña: $e'};
     }
   }
-
-
 
   /// Guarda una venta
   static Future<Map<String, dynamic>> guardarVenta(
@@ -454,12 +508,12 @@ class Basededatos {
     if (objetos.isEmpty) {
       return {
         'exito': false,
-        'mensaje': 'No se pueden guardar ventas sin productos'
+        'mensaje': 'No se pueden guardar ventas sin productos',
       };
     }
 
     final db = await database;
-    
+
     try {
       return await db.transaction((txn) async {
         for (final objeto in objetos) {
@@ -469,22 +523,24 @@ class Basededatos {
             whereArgs: [objeto['productoCodigo']],
             limit: 1,
           );
-          
+
           if (producto.isEmpty) {
-            throw Exception('Producto ${objeto['productoCodigo']} no encontrado');
+            throw Exception(
+              'Producto ${objeto['productoCodigo']} no encontrado',
+            );
           }
-          
+
           final disponible = producto.first['existencias'] as int;
           final solicitado = objeto['cantidad'] as int;
-          
+
           if (disponible < solicitado) {
             throw Exception(
               'Inventario insuficiente para producto ${objeto['productoCodigo']}. '
-              'Disponible: $disponible, Solicitado: $solicitado'
+              'Disponible: $disponible, Solicitado: $solicitado',
             );
           }
         }
-        
+
         // 2. Insertar venta
         final ventaId = await txn.insert('ventas', {
           'fecha': venta['fecha'] ?? DateTime.now().toIso8601String(),
@@ -495,7 +551,7 @@ class Basededatos {
           'usuario_id': venta['usuario_id'],
           'metodo_pago': venta['metodo_pago'] ?? 'efectivo',
         });
-        
+
         for (final objeto in objetos) {
           await txn.insert('venta_objetos', {
             'ventaCodigo': ventaId,
@@ -503,13 +559,13 @@ class Basededatos {
             'cantidad': objeto['cantidad'],
             'precio': objeto['precio'],
           });
-          
+
           await txn.rawUpdate(
             'UPDATE productos SET existencias = existencias - ? WHERE codigo = ?',
-            [objeto['cantidad'], objeto['productoCodigo']]
+            [objeto['cantidad'], objeto['productoCodigo']],
           );
         }
-        
+
         return {
           'exito': true,
           'mensaje': 'Venta guardada exitosamente con inventario actualizado',
@@ -517,10 +573,7 @@ class Basededatos {
         };
       });
     } catch (e) {
-      return {
-        'exito': false,
-        'mensaje': 'Error al guardar venta: $e',
-      };
+      return {'exito': false, 'mensaje': 'Error al guardar venta: $e'};
     }
   }
 
@@ -600,16 +653,12 @@ class Basededatos {
     };
   }
 
-
-    static Future<Map<String, dynamic>> actualizarInventario( 
+  static Future<Map<String, dynamic>> actualizarInventario(
     OperacionInventario operacion,
     List<Map<String, dynamic>> productos,
   ) async {
     if (productos.isEmpty) {
-      return {
-        'exito': false,
-        'mensaje': 'Lista de productos vacía',
-      };
+      return {'exito': false, 'mensaje': 'Lista de productos vacía'};
     }
 
     try {
@@ -635,7 +684,8 @@ class Basededatos {
             throw Exception('Producto con código $codigo no encontrado');
           }
 
-          final existenciasActuales = productoActual.first['existencias'] as int;
+          final existenciasActuales =
+              productoActual.first['existencias'] as int;
           int cantidadNueva;
 
           switch (operacion) {
@@ -647,7 +697,7 @@ class Basededatos {
               if (cantidadNueva < 0) {
                 throw Exception(
                   'Inventario insuficiente para producto $codigo. '
-                  'Disponible: $existenciasActuales, Solicitado: $cantidad'
+                  'Disponible: $existenciasActuales, Solicitado: $cantidad',
                 );
               }
               break;
@@ -674,10 +724,7 @@ class Basededatos {
         };
       });
     } catch (e) {
-      return {
-        'exito': false,
-        'mensaje': 'Error al actualizar inventario: $e',
-      };
+      return {'exito': false, 'mensaje': 'Error al actualizar inventario: $e'};
     }
   }
 
@@ -701,7 +748,9 @@ class Basededatos {
         });
   }
 
-  static Future<Map<String, dynamic>> obtenerObjetoPorCodigo(String codigo) async {
+  static Future<Map<String, dynamic>> obtenerObjetoPorCodigo(
+    String codigo,
+  ) async {
     final db = await database;
     try {
       final resultado = await db.query(
@@ -712,10 +761,7 @@ class Basededatos {
       );
 
       if (resultado.isEmpty) {
-        return {
-          'encontrado': false,
-          'mensaje': 'Producto no encontrado',
-        };
+        return {'encontrado': false, 'mensaje': 'Producto no encontrado'};
       }
 
       return {
@@ -724,10 +770,7 @@ class Basededatos {
         'mensaje': 'Producto encontrado',
       };
     } catch (e) {
-      return {
-        'encontrado': false,
-        'mensaje': 'Error al buscar producto: $e',
-      };
+      return {'encontrado': false, 'mensaje': 'Error al buscar producto: $e'};
     }
   }
 
@@ -740,7 +783,7 @@ class Basededatos {
     DateTime? fechaHasta,
   }) async {
     final db = await database;
-    
+
     try {
       final reporteId = await db.insert('reportes', {
         'tipo_reporte': 'inventario',
@@ -759,10 +802,7 @@ class Basededatos {
         'mensaje': 'Reporte de inventario creado exitosamente',
       };
     } catch (e) {
-      return {
-        'exito': false,
-        'mensaje': 'Error al crear reporte: $e',
-      };
+      return {'exito': false, 'mensaje': 'Error al crear reporte: $e'};
     }
   }
 
@@ -774,10 +814,10 @@ class Basededatos {
     String? motivo,
   }) async {
     final db = await database;
-    
+
     try {
       final diferencia = cantidadActual - cantidadAnterior;
-      
+
       await db.insert('reportes_inventario', {
         'reporte_id': reporteId,
         'producto_id': productoId,
@@ -788,15 +828,9 @@ class Basededatos {
         'fecha_registro': DateTime.now().toIso8601String(),
       });
 
-      return {
-        'exito': true,
-        'mensaje': 'Detalle agregado al reporte',
-      };
+      return {'exito': true, 'mensaje': 'Detalle agregado al reporte'};
     } catch (e) {
-      return {
-        'exito': false,
-        'mensaje': 'Error al agregar detalle: $e',
-      };
+      return {'exito': false, 'mensaje': 'Error al agregar detalle: $e'};
     }
   }
 
@@ -806,7 +840,7 @@ class Basededatos {
     String titulo = 'Reporte de Inventario',
   }) async {
     final db = await database;
-    
+
     try {
       return await db.transaction((txn) async {
         final reporteId = await txn.insert('reportes', {
@@ -819,14 +853,14 @@ class Basededatos {
         });
 
         final productos = await txn.query('productos');
-        
+
         for (final producto in productos) {
           final cantidadActual = producto['existencias'] as int;
-          
+
           await txn.insert('reportes_inventario', {
             'reporte_id': reporteId,
             'producto_id': producto['codigo'],
-            'cantidad_anterior': cantidadActual, 
+            'cantidad_anterior': cantidadActual,
             'cantidad_actual': cantidadActual,
             'diferencia': 0,
             'motivo': 'Inventario actual',
@@ -842,52 +876,55 @@ class Basededatos {
         };
       });
     } catch (e) {
-      return {
-        'exito': false,
-        'mensaje': 'Error al generar reporte: $e',
-      };
+      return {'exito': false, 'mensaje': 'Error al generar reporte: $e'};
     }
   }
 
   ///Obtener objetos por sucursal
-  static Future<Map<String, dynamic>> obtenerObjetosPorSucursal(int sucursal) async{
+  static Future<Map<String, dynamic>> obtenerObjetosPorSucursal(
+    int sucursal,
+  ) async {
     final bd = await database;
 
-    try{
-      final objetos = await bd.rawQuery('''
+    try {
+      final objetos = await bd.rawQuery(
+        '''
       Select * from productos where sucursal = ?
-      ''', [sucursal]);
+      ''',
+        [sucursal],
+      );
       return {'productos': objetos};
-    }
-    catch (e){
+    } catch (e) {
       return {
         'exito': false,
-        'mensaje': 'No se pudieron obtener los objetos por sucursal: $e'
+        'mensaje': 'No se pudieron obtener los objetos por sucursal: $e',
       };
     }
-
   }
 
   /// Obtiene un reporte con todos sus detalles
-  static Future<Map<String, dynamic>> obtenerReporteCompleto(int reporteId) async {
+  static Future<Map<String, dynamic>> obtenerReporteCompleto(
+    int reporteId,
+  ) async {
     final db = await database;
-    
+
     try {
-      final reporteInfo = await db.rawQuery('''
+      final reporteInfo = await db.rawQuery(
+        '''
         SELECT r.*, u.nombre as creador_nombre
         FROM reportes r
         JOIN usuarios u ON r.creado_por = u.id
         WHERE r.id = ?
-      ''', [reporteId]);
+      ''',
+        [reporteId],
+      );
 
       if (reporteInfo.isEmpty) {
-        return {
-          'exito': false,
-          'mensaje': 'Reporte no encontrado',
-        };
+        return {'exito': false, 'mensaje': 'Reporte no encontrado'};
       }
 
-      final detalles = await db.rawQuery('''
+      final detalles = await db.rawQuery(
+        '''
         SELECT 
           ri.*,
           p.productoNombre,
@@ -898,7 +935,9 @@ class Basededatos {
         JOIN productos p ON ri.producto_id = p.codigo
         WHERE ri.reporte_id = ?
         ORDER BY ri.fecha_registro ASC
-      ''', [reporteId]);
+      ''',
+        [reporteId],
+      );
 
       return {
         'exito': true,
@@ -907,21 +946,18 @@ class Basededatos {
         'mensaje': 'Reporte obtenido exitosamente',
       };
     } catch (e) {
-      return {
-        'exito': false,
-        'mensaje': 'Error al obtener reporte: $e',
-      };
+      return {'exito': false, 'mensaje': 'Error al obtener reporte: $e'};
     }
   }
 
   /// Listado de reportes
   static Future<Map<String, dynamic>> listarReportes({int? creadoPor}) async {
     final db = await database;
-    
+
     try {
       String whereClause = '1=1';
       List<dynamic> whereArgs = [];
-      
+
       if (creadoPor != null) {
         whereClause += ' AND r.creado_por = ?';
         whereArgs.add(creadoPor);
@@ -982,12 +1018,14 @@ class Basededatos {
         )
         .toList();
 
-    final resultado= await guardarProductos(productos);
+    final resultado = await guardarProductos(productos);
     print(resultado);
   }
 
   /// Desactiva productos (soft delete) en lugar de eliminarlos
-  static Future<Map<String, dynamic>> desactivarProductos(List<String> codigos) async {
+  static Future<Map<String, dynamic>> desactivarProductos(
+    List<String> codigos,
+  ) async {
     final db = await database;
     try {
       int productosAfectados = 0;
@@ -1002,7 +1040,7 @@ class Basededatos {
           productosAfectados += rowsAffected;
         }
       });
-      
+
       return {
         'exito': true,
         'mensaje': 'Productos desactivados exitosamente',
@@ -1018,7 +1056,9 @@ class Basededatos {
   }
 
   /// Reactiva productos previamente desactivados
-  static Future<Map<String, dynamic>> reactivarProductos(List<String> codigos) async {
+  static Future<Map<String, dynamic>> reactivarProductos(
+    List<String> codigos,
+  ) async {
     final db = await database;
     try {
       int productosAfectados = 0;
@@ -1033,7 +1073,7 @@ class Basededatos {
           productosAfectados += rowsAffected;
         }
       });
-      
+
       return {
         'exito': true,
         'mensaje': 'Productos reactivados exitosamente',
@@ -1048,27 +1088,32 @@ class Basededatos {
     }
   }
 
-
-    /// Reactiva productos previamente desactivados
-  static Future<Map<String, dynamic>> actualizarExistencias(int codigo, int cantidad, OperacionInventario operacion) async {
+  /// Reactiva productos previamente desactivados
+  static Future<Map<String, dynamic>> actualizarExistencias(
+    int codigo,
+    int cantidad,
+    OperacionInventario operacion,
+  ) async {
     final bd = await database;
     try {
       if (operacion == OperacionInventario.restar) {
         cantidad = -cantidad;
       }
-     await bd.transaction((tns) async {
-
-      await tns.rawUpdate('''
+      await bd.transaction((tns) async {
+        await tns.rawUpdate(
+          '''
         UPDATE productos
         SET existencias = 
         ${operacion == OperacionInventario.actualizar ? '?' : 'existencias + ?'}
           WHERE codigo = ?
-          ''', [cantidad, codigo]);});
+          ''',
+          [cantidad, codigo],
+        );
+      });
       return {
         'exito': true,
         'mensaje': 'Existencias agregadas exitosamente',
         'cantidad_agregada': cantidad,
-        
       };
     } catch (e) {
       return {
@@ -1097,5 +1142,4 @@ class Basededatos {
       print('Error al eliminar productos: $e');
     }
   }
-
 }

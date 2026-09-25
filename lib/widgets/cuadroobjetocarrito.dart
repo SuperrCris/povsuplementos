@@ -1,5 +1,3 @@
-import 'dart:ffi';
-
 import 'package:flutter/material.dart';
 import 'package:pov_suplementos/widgets/carritodecompras.dart';
 
@@ -65,15 +63,21 @@ class _ElementoCompraState extends State<ElementoCompra>
             child: Row(
               children: [
                 
-                Container(
+                SizedBox(
                   width: 40,
                   height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
+                  child: ClipRRect(
                     borderRadius: BorderRadius.circular(4),
+                    child: widget.item.producto.imagenWidget != null
+                        ? Image(
+                            image: widget.item.producto.imagenWidget!.image,
+                            fit: BoxFit.cover,
+                          )
+                        : Container(
+                            color: Colors.grey[200],
+                            child: Icon(Icons.image, color: Colors.grey),
+                          ),
                   ),
-                  child: widget.item.producto.imagenWidget ??
-                    Icon(Icons.image, color: Colors.grey),
                 ),
                 
                 SizedBox(width: 12),
@@ -112,7 +116,7 @@ class _ElementoCompraState extends State<ElementoCompra>
                       padding: EdgeInsets.zero,
                     ),
                     
-                    Container(
+                    SizedBox(
                       width: 30,
                       child: Text(
                         '${widget.item.cantidad}',
