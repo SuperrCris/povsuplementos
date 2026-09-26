@@ -7,6 +7,8 @@ class DBSemillero {
   static Future<void> crearUsuariosDefecto() async {
     await listarTodosLosUsuarios();
     await verSiAdminExiste();
+
+  
     
     try {
       final existingCajero = await Basededatos.buscarUsuarioPorNombre('cajero');

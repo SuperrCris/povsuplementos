@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart';
 import 'package:pov_suplementos/estructuras/objeto.dart';
 import 'package:pov_suplementos/funciones/basededatos.dart';
 import 'package:pov_suplementos/widgets/agregarexistencias.dart';
 import 'package:pov_suplementos/widgets/agregarobjeto.dart';
 
-List<String> seleccionados = [];
+Set<String> seleccionados = {};
+List<int> rango = [];
 
 enum Accion { ver, eliminar, agregar }
 
@@ -20,6 +23,8 @@ void actualizarSeleccionados(var codigo, bool seleccionado) {
   print('Seleccionados actualizados: $seleccionados');
 }
 
+
+
 class Inventario extends StatefulWidget {
   const Inventario({super.key});
   @override
@@ -29,6 +34,21 @@ class Inventario extends StatefulWidget {
 class _InventarioState extends State<Inventario> {
   Accion accionActual = Accion.ver;
   late Future<List<Objeto>> _productosFuture;
+  OverlayEntry? _menuContextual;
+
+  bool _teclaEstaPresionada(LogicalKeyboardKey tecla) {
+    return HardwareKeyboard.instance.logicalKeysPressed.contains(tecla);
+  }
+
+  bool _shiftEstaPresionado() {
+    return _teclaEstaPresionada(LogicalKeyboardKey.shiftLeft) ||
+        _teclaEstaPresionada(LogicalKeyboardKey.shiftRight);
+  }
+
+  bool _ctrlEstaPresionado() {
+    return _teclaEstaPresionada(LogicalKeyboardKey.controlLeft) ||
+        _teclaEstaPresionada(LogicalKeyboardKey.controlRight);
+  }
 
   void _manejarOpcionSeleccionada(String opcion, Objeto objeto) {
     switch (opcion) {
@@ -47,6 +67,77 @@ class _InventarioState extends State<Inventario> {
     }
   }
 
+  void _cerrarMenuContextual() {
+    _menuContextual?.remove();
+    _menuContextual = null;
+  }
+
+  void _mostrarMenuContextual(TapDownDetails detalles, Objeto objeto) {
+    _cerrarMenuContextual();
+
+    _menuContextual = OverlayEntry(
+      builder: (context) => Positioned(
+        left: detalles.globalPosition.dx,
+        top: detalles.globalPosition.dy,
+        child: Material(
+          elevation: 8,
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            width: 210,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _opcionMenuContextual(
+                  Icons.info_outline,
+                  'Ver detalles',
+                  'ver_detalles',
+                  objeto,
+                ),
+                _opcionMenuContextual(
+                  Icons.edit_outlined,
+                  'Editar producto',
+                  'editar',
+                  objeto,
+                ),
+                _opcionMenuContextual(
+                  Icons.inventory_outlined,
+                  'Ajustar stock',
+                  'ajustar_stock',
+                  objeto,
+                ),
+                _opcionMenuContextual(
+                  Icons.history,
+                  'Ver historial',
+                  'historial',
+                  objeto,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    Overlay.of(context, rootOverlay: true).insert(_menuContextual!);
+  }
+
+  Widget _opcionMenuContextual(
+    IconData icono,
+    String titulo,
+    String opcion,
+    Objeto objeto,
+  ) {
+    return ListTile(
+      dense: true,
+      leading: Icon(icono),
+      title: Text(titulo),
+      onTap: () {
+        _cerrarMenuContextual();
+        _manejarOpcionSeleccionada(opcion, objeto);
+      },
+    );
+  }
+
   void _mostrarDetallesProducto(Objeto objeto) {
     showDialog(
       context: context,
@@ -58,7 +149,7 @@ class _InventarioState extends State<Inventario> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Nombre: ${objeto.productoNombre}',
+                '${objeto.productoNombre}',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               SizedBox(height: 8),
@@ -67,6 +158,8 @@ class _InventarioState extends State<Inventario> {
               Text('Existencias: ${objeto.existencias}'),
               SizedBox(height: 8),
               Text('Precio: \$${objeto.precio}'),
+              SizedBox(height: 8),
+              Text('Categoría: ${objeto.categoria}'),
             ],
           ),
           actions: [
@@ -81,8 +174,67 @@ class _InventarioState extends State<Inventario> {
   }
 
   void _editarProducto(Objeto objeto) {
-    print('Editar producto: ${objeto.productoNombre}');
-    // Implementa la lógica para editar el producto
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Detalles del Producto'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: TextEditingController(text: objeto.productoNombre),
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              TextField(
+                controller: TextEditingController(
+                  text: objeto.existencias.toString(),
+                ),
+              ),
+              SizedBox(height: 8),
+              TextField(
+                controller: TextEditingController(
+                  text: objeto.precio.toString(),
+                ),
+              ),
+              SizedBox(height: 8),
+              TextField(
+                controller: TextEditingController(text: objeto.categoria),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async =>
+                  await Basededatos.actualizarProducto(objeto.codigo, {
+                    'productoNombre': objeto.productoNombre,
+                    'existencias': objeto.existencias,
+                    'precio': objeto.precio,
+                    'categoria': objeto.categoria,
+                  }).then((result) {
+                    if (result['exito']) {
+                      print('✅ Producto actualizado exitosamente');
+                      setState(() {
+                        _productosFuture = obtenerInfo();
+                      });
+                    } else {
+                      print(
+                        '❌ Error actualizando producto: ${result['mensaje']}',
+                      );
+                    }
+                  }),
+              child: Text('Guardar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Cancelar'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _ajustarStock(Objeto objeto) {
@@ -142,6 +294,7 @@ class _InventarioState extends State<Inventario> {
 
   @override
   void dispose() {
+    _cerrarMenuContextual();
     controladorBusqueda.dispose();
     super.dispose();
   }
@@ -149,19 +302,10 @@ class _InventarioState extends State<Inventario> {
   @override
   Widget build(BuildContext context) {
     double anchoPantalla = MediaQuery.of(context).size.width;
-    int crossAxisCount = (anchoPantalla / 400).round();
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     return Scaffold(
-      floatingActionButton: accionActual == Accion.eliminar
-          ? FloatingActionButton(
-              onPressed: _manejarBotonEliminar,
-              backgroundColor: colors.errorContainer,
-              foregroundColor: colors.onErrorContainer,
-              tooltip: 'Eliminar productos seleccionados',
-              child: const Icon(Icons.delete),
-            )
-          : null,
+
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: SingleChildScrollView(
@@ -169,6 +313,18 @@ class _InventarioState extends State<Inventario> {
             mainAxisAlignment: MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: ElevatedButton(
+                  onPressed: () {},
+                  child: Text(
+                    'Salir',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: colors.onPrimary,
+                    ),
+                  ),
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Text(
@@ -205,9 +361,10 @@ class _InventarioState extends State<Inventario> {
                     2: {'nombre': 'BODY 2'},
                   }),
                   Tooltip(
-                    message: accionActual == Accion.ver
-                        ? 'Seleccionar productos para eliminar'
-                        : 'Cancelar seleccion',
+                    message: 
+                    seleccionados.isNotEmpty
+                        ? 'Eliminar ${seleccionados.length} ${seleccionados.length == 1 ? 'producto' : 'productos'} \n${seleccionados.join('\n')}'
+                        : 'Sin productos por eliminar',
                     child: IconButton.filledTonal(
                       style: IconButton.styleFrom(
                         backgroundColor: accionActual == Accion.ver
@@ -252,16 +409,13 @@ class _InventarioState extends State<Inventario> {
                       icon: const Icon(Icons.add),
                     ),
                   ),
-                  Row(
+                  Wrap(
+                    runSpacing: 10,
                     spacing: 10,
                     children: [
                       ElevatedButton(
                         onPressed: () {},
-                        child: const Text('Crear reporte inicial'),
-                      ),
-                      ElevatedButton(
-                        onPressed: () {},
-                        child: const Text('Crear reporte final'),
+                        child: const Text('Confirmar inventario'),
                       ),
                     ],
                   ),
@@ -301,144 +455,220 @@ class _InventarioState extends State<Inventario> {
                         'No se encontraron productos que coincidan con "${texto}"',
                       );
                     }
-                    return Container(
-                      height: MediaQuery.of(context).size.height - 200,
-                      child: GridView.builder(
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          childAspectRatio: 2.5 - (anchoPantalla / 1500),
-                          crossAxisCount: crossAxisCount > 0
-                              ? crossAxisCount
-                              : 1,
-                        ),
-                        itemCount: productosFiltrados.length,
-                        itemBuilder: (context, index) {
-                          Objeto objeto = productosFiltrados[index];
+                    return Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: productosFiltrados.map((objeto) {
+                        return GestureDetector(
+                          onSecondaryTapDown: (detalles) {
+                            _mostrarMenuContextual(detalles, objeto);
+                          },
+                          onTap: () {
+                            _cerrarMenuContextual();
+                            setState(() {
+                              if (_shiftEstaPresionado()) {
 
-                          return Card(
-                            margin: const EdgeInsets.all(4),
-                            color: objeto.activo
-                                ? colors.surfaceContainerLow
-                                : colors.surfaceContainerHighest,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8.0),
-                              side: BorderSide(color: colors.outlineVariant),
-                            ),
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 8,
+                                if (seleccionados.contains(objeto.codigo)) {
+                                  seleccionados.remove(objeto.codigo);
+                                } else {
+                                  seleccionados.add(objeto.codigo);
+                                  rango[0] = productosFiltrados.indexOf(objeto);
+                                }
+                              } else if (_ctrlEstaPresionado()) {
+                                
+                                  seleccionados.add(objeto.codigo);
+                                   if (rango.length == 0) {
+                                     rango[0] = productosFiltrados.indexOf(objeto);
+                                   } else if (rango.length == 1) {
+                                     rango[1] = productosFiltrados.indexOf(objeto);
+                                   }
+                                  print(
+                                    'Rango actualizado: $rango',
+                                  );
+                                  if (rango.length > 2) {
+                                    rango.sort();
+                                    for (var i = rango[0] + 1; i < rango[1]; i++) {
+                                      seleccionados.add(productosFiltrados[i].codigo);
+                                    }
+                                    rango.clear();
+                                  }
+                                
+                              } else {
+                                
+                                if (!seleccionados.contains(objeto.codigo)) {
+                                  seleccionados
+                                    ..clear()
+                                    ..add(objeto.codigo);
+                                  rango[0] = productosFiltrados.indexOf(objeto);
+                                } else {
+                                  seleccionados.clear();
+                                }
+                              }
+                              print(
+                                'Seleccionados actualizados: $seleccionados',
+                              );
+                            });
+                          },
+                          child: SizedBox(
+                            width: anchoPantalla < 600
+                                ? double.infinity
+                                : (anchoPantalla - 56) / 3,
+                            child: Card(
+                              clipBehavior: Clip.antiAlias,
+                              margin: const EdgeInsets.all(1),
+                              color: seleccionados.contains(objeto.codigo)
+                                  ? colors.primaryFixed
+                                  : colors.surfaceContainerHighest,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8.0),
+                                side: BorderSide(color: colors.outlineVariant),
                               ),
-                              title: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      objeto.productoNombre,
-                                      style: theme.textTheme.titleMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                            color: objeto.activo
-                                                ? colors.onSurface
-                                                : colors.onSurfaceVariant,
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      spacing: 4,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            objeto.productoNombre,
+                                            style: theme.textTheme.titleMedium
+                                                ?.copyWith(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: objeto.activo
+                                                      ? colors.onSurface
+                                                      : colors.onSurfaceVariant,
+                                                ),
+
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
                                           ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  accionActual == Accion.eliminar
-                                      ? Seleccionador(
-                                          codigo: objeto.codigo,
-                                          actualizarLista:
-                                              actualizarSeleccionados,
-                                        )
-                                      : PopupMenuButton<String>(
-                                          icon: Icon(
-                                            Icons.more_vert,
-                                            color: Theme.of(
-                                              context,
-                                            ).iconTheme.color,
-                                          ),
-                                          onSelected: (String value) {
-                                            _manejarOpcionSeleccionada(
-                                              value,
-                                              objeto,
-                                            );
-                                          },
-                                          itemBuilder: (BuildContext context) =>
-                                              [
-                                                PopupMenuItem<String>(
-                                                  value: 'ver_detalles',
-                                                  child: Row(
-                                                    children: [
-                                                      Icon(Icons.info_outline),
-                                                      SizedBox(width: 8),
-                                                      Text('Ver detalles'),
-                                                    ],
-                                                  ),
-                                                ),
-                                                PopupMenuItem<String>(
-                                                  value: 'editar',
-                                                  child: Row(
-                                                    children: [
-                                                      Icon(Icons.edit_outlined),
-                                                      SizedBox(width: 8),
-                                                      Text('Editar producto'),
-                                                    ],
-                                                  ),
-                                                ),
-                                                PopupMenuItem<String>(
-                                                  value: 'ajustar_stock',
-                                                  child: Row(
-                                                    children: [
-                                                      Icon(
-                                                        Icons
-                                                            .inventory_outlined,
-                                                      ),
-                                                      SizedBox(width: 8),
-                                                      Text('Ajustar stock'),
-                                                    ],
-                                                  ),
-                                                ),
-                                                PopupMenuItem<String>(
-                                                  value: 'historial',
-                                                  child: Row(
-                                                    children: [
-                                                      Icon(Icons.history),
-                                                      SizedBox(width: 8),
-                                                      Text('Ver historial'),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ],
                                         ),
-                                ],
-                              ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
+                                        Flexible(
+                                          child: Text(
+                                            '\$${objeto.precio}',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontStyle: FontStyle.italic,
+                                              color: Colors.green,
+                                            ),
+                                            maxLines: 1,
 
-                                  Text(
-                                    'Hay: ${objeto.existencias}',
-                                    style: const TextStyle(
-                                      fontSize: 24,
-                                      overflow: TextOverflow.ellipsis,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: Text(
+                                            'Hay: ${objeto.existencias}',
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                            // minFontSize: 12,
+                                            maxLines: 1,
+                                            textAlign: TextAlign.right,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+
+                                        /*    SizedBox(
+                                            width: 48,
+                                            child: accionActual == Accion.eliminar
+                                                ? Seleccionador(
+                                                    codigo: objeto.codigo,
+                                                    actualizarLista:
+                                                        actualizarSeleccionados,
+                                                  )
+                                                : PopupMenuButton<String>(
+                                                    icon: Icon(
+                                                      Icons.more_vert,
+                                                      color: Theme.of(
+                                                        context,
+                                                      ).iconTheme.color,
+                                                    ),
+                                                    onSelected: (String value) {
+                                                      _manejarOpcionSeleccionada(
+                                                        value,
+                                                        objeto,
+                                                      );
+                                                    },
+                                                    itemBuilder:
+                                                        (BuildContext context) => [
+                                                          PopupMenuItem<String>(
+                                                            value: 'ver_detalles',
+                                                            child: Row(
+                                                              children: [
+                                                                Icon(
+                                                                  Icons
+                                                                      .info_outline,
+                                                                ),
+                                                                SizedBox(width: 8),
+                                                                Text(
+                                                                  'Ver detalles',
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                          PopupMenuItem<String>(
+                                     
+                                                            value: 'editar',
+                                                            child: Row(
+                                                              children: [
+                                                                Icon(
+                                                                  Icons
+                                                                      .edit_outlined,
+                                                                ),
+                                                                SizedBox(width: 8),
+                                                                Text(
+                                                                  'Editar producto',
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                          PopupMenuItem<String>(
+                                                            value: 'ajustar_stock',
+                                                            child: Row(
+                                                              children: [
+                                                                Icon(
+                                                                  Icons
+                                                                      .inventory_outlined,
+                                                                ),
+                                                                SizedBox(width: 8),
+                                                                Text(
+                                                                  'Ajustar stock',
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                          PopupMenuItem<String>(
+                                                            value: 'historial',
+                                                            child: Row(
+                                                              children: [
+                                                                Icon(Icons.history),
+                                                                SizedBox(width: 8),
+                                                                Text(
+                                                                  'Ver historial',
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                  ),
+                                          ), */
+                                      ],
                                     ),
-                                  ),
-                                  Text(
-                                    '\$${objeto.precio}',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontStyle: FontStyle.italic,
-                                      color: colors.primary,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          );
-                        },
-                      ),
+                          ),
+                        );
+                      }).toList(),
                     );
                   }
                 },
@@ -500,7 +730,7 @@ class _InventarioState extends State<Inventario> {
   }
 
   void _manejarBotonEliminar() async {
-    await Basededatos.desactivarProductos(seleccionados);
+    await Basededatos.desactivarProductos(seleccionados.toList());
     setState(() {
       seleccionados.clear();
       accionActual = Accion.ver;

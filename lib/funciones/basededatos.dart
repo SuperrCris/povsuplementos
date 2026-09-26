@@ -1142,4 +1142,111 @@ class Basededatos {
       print('Error al eliminar productos: $e');
     }
   }
+
+  static Future<Map<String, dynamic>> actualizarProducto(
+    String codigo,
+    Map<String, Object?> datos,
+  ) async {
+    if (codigo.trim().isEmpty) {
+      return {
+        'exito': false,
+        'mensaje': 'El código del producto es requerido',
+      };
+    }
+
+    if (datos.isEmpty) {
+      return {
+        'exito': false,
+        'mensaje': 'No se enviaron datos para actualizar',
+      };
+    }
+
+    final db = await database;
+
+    try {
+      final productoActual = await db.query(
+        'productos',
+        where: 'codigo = ?',
+        whereArgs: [codigo],
+        limit: 1,
+      );
+
+      if (productoActual.isEmpty) {
+        return {
+          'exito': false,
+          'mensaje': 'Producto no encontrado',
+        };
+      }
+
+      final cambios = <String, Object?>{};
+      final validadores = <String, dynamic Function(Object?)>{
+        'productoNombre': (valor) => valor is String && valor.trim().isNotEmpty,
+        'marcaNombre': (valor) => valor is String && valor.trim().isNotEmpty,
+        'descripcion': (valor) => valor == null || valor is String,
+        'precio': (valor) => valor is num && valor >= 0,
+        'imagen': (valor) => valor == null || valor is String,
+        'existencias': (valor) => valor is int && valor >= 0,
+        'categoria': (valor) => valor is String && valor.trim().isNotEmpty,
+        'activo': (valor) => valor is int && (valor == 0 || valor == 1),
+        'sucursal': (valor) => valor is int && valor >= 0,
+      };
+
+      for (final entrada in datos.entries) {
+        final clave = entrada.key;
+        final valor = entrada.value;
+
+        if (clave == 'codigo') {
+          return {
+            'exito': false,
+            'mensaje': 'No se permite cambiar el código del producto',
+          };
+        }
+
+        if (!validadores.containsKey(clave)) {
+          continue;
+        }
+
+        if (!validadores[clave]!(valor)) {
+          return {
+            'exito': false,
+            'mensaje': 'El campo "$clave" tiene un valor inválido',
+          };
+        }
+
+        cambios[clave] = valor;
+      }
+
+      if (cambios.isEmpty) {
+        return {
+          'exito': false,
+          'mensaje': 'No se encontraron campos válidos para actualizar',
+        };
+      }
+
+      final filasAfectadas = await db.update(
+        'productos',
+        cambios,
+        where: 'codigo = ?',
+        whereArgs: [codigo],
+      );
+
+      if (filasAfectadas == 0) {
+        return {
+          'exito': false,
+          'mensaje': 'No se pudo actualizar el producto',
+        };
+      }
+
+      return {
+        'exito': true,
+        'mensaje': 'Producto actualizado correctamente',
+        'filas_afectadas': filasAfectadas,
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'mensaje': 'Error al actualizar producto: $e',
+      };
+    }
+  }
 }
