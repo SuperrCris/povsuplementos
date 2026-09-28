@@ -19,6 +19,7 @@ dependencies:
   path: ^1.9.0
   auto_size_text: ^3.0.0
   http: ^1.6.0
+  pluto_grid: ^8.1.0
 
 
 dev_dependencies:

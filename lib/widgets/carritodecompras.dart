@@ -88,7 +88,7 @@ class _EstadoWidgetCarritoCompra extends State<WidgetCarritoCompra>  with RolReq
   @override
   Widget build(BuildContext context) {
     double total = carrito.fold(0.0, (sum, item) => sum + item.subtotal);
-    
+    double ancho = MediaQuery.of(context).size.width;
     return Container(
       decoration: BoxDecoration(
         border: Border.all(color: Colors.grey.shade300),
@@ -112,21 +112,22 @@ class _EstadoWidgetCarritoCompra extends State<WidgetCarritoCompra>  with RolReq
             children: [
               Icon(Icons.shopping_cart, color: Colors.blue),
               SizedBox(width: 8),
-              Text(
+              ancho >= 700 ? Text(
                 'Carrito de Compras',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: Colors.blue,
                 ),
-              ),
+              ) : SizedBox.shrink(),
               Spacer(),
               if (carrito.isNotEmpty)
                 TextButton(
                   onPressed: _limpiarCarrito,
                   child: Text(
                     'Limpiar',
-                    style: TextStyle(color: Colors.red),
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
                   ),
                 ),
             ],
@@ -138,7 +139,7 @@ class _EstadoWidgetCarritoCompra extends State<WidgetCarritoCompra>  with RolReq
               : _listaConProductos(),
           ),
           
-          if (carrito.isNotEmpty) ...[
+          if (carrito.isNotEmpty || ancho >= 700) ...[
             Divider(),
             _widgetTotal(total),
           ],

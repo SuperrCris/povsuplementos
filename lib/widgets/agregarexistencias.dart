@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:pov_suplementos/funciones/basededatos.dart';
 
 class ActualizarExistencias extends StatefulWidget {
-  int codigo;
+  String codigo;
   int cantidad;
   OperacionInventario operacion;
   void Function()? alTenerExito;
@@ -20,11 +20,11 @@ class ActualizarExistencias extends StatefulWidget {
 }
 
 class _ActualizarExistenciasState extends State<ActualizarExistencias> {
-        final TextEditingController _cantidadControlador = TextEditingController();
+  final TextEditingController _cantidadControlador = TextEditingController();
 
-    int cantidadActualizada = 0;
+  int cantidadActualizada = 0;
 
-        @override
+  @override
   void initState() {
     super.initState();
     _cantidadControlador.text = widget.cantidad.toString();
@@ -61,37 +61,42 @@ class _ActualizarExistenciasState extends State<ActualizarExistencias> {
               controller: _cantidadControlador,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             ),
-                      DropdownButton<OperacionInventario>(
-            value: widget.operacion,
-            items: [
-              DropdownMenuItem(
-                value: OperacionInventario.agregar,
-                child: Text('Agregar'),
-              ),
-              DropdownMenuItem(
-                value: OperacionInventario.restar,
-                child: Text('Restar'),
-              ),
-              DropdownMenuItem(
-                value: OperacionInventario.actualizar,
-                child: Text('Actualizar'),
-              ),
-            ],
-            onChanged: (OperacionInventario? nuevaOperacion) {
-              if (nuevaOperacion != null) {
-                setState(() {
-                  cantidadActualizada = calcularNuevaCantidad(widget.cantidad, int.tryParse(_cantidadControlador.text) ?? 0, nuevaOperacion);
-                  widget.operacion = nuevaOperacion;
-                });
-              }
-            },
-          ),
+            DropdownButton<OperacionInventario>(
+              value: widget.operacion,
+              items: [
+                DropdownMenuItem(
+                  value: OperacionInventario.agregar,
+                  child: Text('Agregar'),
+                ),
+                DropdownMenuItem(
+                  value: OperacionInventario.restar,
+                  child: Text('Restar'),
+                ),
+                DropdownMenuItem(
+                  value: OperacionInventario.actualizar,
+                  child: Text('Actualizar'),
+                ),
+              ],
+              onChanged: (OperacionInventario? nuevaOperacion) {
+                if (nuevaOperacion != null) {
+                  setState(() {
+                    cantidadActualizada = calcularNuevaCantidad(
+                      widget.cantidad,
+                      int.tryParse(_cantidadControlador.text) ?? 0,
+                      nuevaOperacion,
+                    );
+                    widget.operacion = nuevaOperacion;
+                  });
+                }
+              },
+            ),
           ],
-
         ),
       ),
       actions: [
-        Text('La nueva cantidad seria: ${calcularNuevaCantidad(widget.cantidad, int.tryParse(_cantidadControlador.text) ?? 0, widget.operacion)}'),
+        Text(
+          'La nueva cantidad seria: ${calcularNuevaCantidad(widget.cantidad, int.tryParse(_cantidadControlador.text) ?? 0, widget.operacion)}',
+        ),
         TextButton(
           onPressed: () {
             Navigator.of(context).pop();
@@ -125,11 +130,14 @@ class _ActualizarExistenciasState extends State<ActualizarExistencias> {
         ),
       ],
     );
-
-    
   }
+
   // Función para calcular la nueva cantidad basada en la operación, pero solo para placeholder
-  int calcularNuevaCantidad(int cantidadActual, int cantidadCambio, OperacionInventario operacion) {
+  int calcularNuevaCantidad(
+    int cantidadActual,
+    int cantidadCambio,
+    OperacionInventario operacion,
+  ) {
     switch (operacion) {
       case OperacionInventario.agregar:
         return cantidadActual + cantidadCambio;

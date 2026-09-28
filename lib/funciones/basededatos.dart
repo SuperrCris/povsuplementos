@@ -11,7 +11,7 @@ enum OperacionInventario { agregar, restar, actualizar }
 class Basededatos {
   static Database? _database;
   static const String _databaseName = 'pov_suplementos.db';
-  static const int _databaseVersion = 8;
+  static const int _databaseVersion = 11;
 
   static final List<Map<String, dynamic>> _productosIniciales = [
     {
@@ -160,6 +160,39 @@ class Basededatos {
       }
       print('Imagenes del catalogo de suplementos actualizadas');
     }
+
+    if (versionAntigua < 9) {
+      await bd.execute('''
+        CREATE TABLE movimientos_inventario (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          producto_codigo TEXT NOT NULL,
+          tipo TEXT NOT NULL,
+          cantidad INTEGER NOT NULL,
+          existencias_anterior INTEGER NOT NULL,
+          existencias_nuevas INTEGER NOT NULL,
+          venta_codigo INTEGER,
+          motivo TEXT,
+          fecha TEXT NOT NULL,
+          FOREIGN KEY (producto_codigo) REFERENCES productos(codigo) ON DELETE RESTRICT,
+          FOREIGN KEY (venta_codigo) REFERENCES ventas(codigo) ON DELETE SET NULL
+        )
+      ''');
+    }
+
+    if (versionAntigua < 11) {
+      final columnas = await bd.rawQuery(
+        'PRAGMA table_info(movimientos_inventario)',
+      );
+      final tieneUsuario = columnas.any(
+        (columna) => columna['name'] == 'usuario_id',
+      );
+      if (!tieneUsuario) {
+        await bd.execute('''
+          ALTER TABLE movimientos_inventario
+          ADD COLUMN usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL
+        ''');
+      }
+    }
   }
 
   /// Crea todas las tablas necesarias en la base de datos
@@ -217,6 +250,24 @@ class Basededatos {
         precio REAL NOT NULL,
         FOREIGN KEY (ventaCodigo) REFERENCES ventas(codigo) ON DELETE CASCADE,
         FOREIGN KEY (productoCodigo) REFERENCES productos(codigo) ON DELETE RESTRICT
+      )
+    ''');
+
+    await bd.execute('''
+      CREATE TABLE movimientos_inventario (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_codigo TEXT NOT NULL,
+        tipo TEXT NOT NULL,
+        cantidad INTEGER NOT NULL,
+        existencias_anterior INTEGER NOT NULL,
+        existencias_nuevas INTEGER NOT NULL,
+        venta_codigo INTEGER,
+        usuario_id INTEGER,
+        motivo TEXT,
+        fecha TEXT NOT NULL,
+        FOREIGN KEY (producto_codigo) REFERENCES productos(codigo) ON DELETE RESTRICT,
+        FOREIGN KEY (venta_codigo) REFERENCES ventas(codigo) ON DELETE SET NULL,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
       )
     ''');
 
@@ -426,6 +477,31 @@ class Basededatos {
     );
   }
 
+  static Future<void> _registrarMovimiento(
+    dynamic transaccion, {
+    required String productoCodigo,
+    required String tipo,
+    required int cantidad,
+    required int existenciasAnterior,
+    required int existenciasNuevas,
+    int? ventaCodigo,
+    int? usuarioId,
+    String? motivo,
+  }) async {
+    final usuario = usuarioId ?? Autenticacion().id;
+    await transaccion.insert('movimientos_inventario', {
+      'producto_codigo': productoCodigo,
+      'tipo': tipo,
+      'cantidad': cantidad,
+      'existencias_anterior': existenciasAnterior,
+      'existencias_nuevas': existenciasNuevas,
+      'venta_codigo': ventaCodigo,
+      'usuario_id': usuario > 0 ? usuario : null,
+      'motivo': motivo,
+      'fecha': DateTime.now().toIso8601String(),
+    });
+  }
+
   /// Obtiene todos los usuarios (solo para administradores)
   static Future<Map<String, dynamic>> obtenerTodosLosUsuarios() async {
     final db = await database;
@@ -553,16 +629,37 @@ class Basededatos {
         });
 
         for (final objeto in objetos) {
+          final producto = await txn.query(
+            'productos',
+            columns: ['existencias'],
+            where: 'codigo = ?',
+            whereArgs: [objeto['productoCodigo']],
+            limit: 1,
+          );
+          final existenciasAnteriores = producto.first['existencias'] as int;
+          final cantidad = objeto['cantidad'] as int;
+
           await txn.insert('venta_objetos', {
             'ventaCodigo': ventaId,
             'productoCodigo': objeto['productoCodigo'],
-            'cantidad': objeto['cantidad'],
+            'cantidad': cantidad,
             'precio': objeto['precio'],
           });
 
           await txn.rawUpdate(
             'UPDATE productos SET existencias = existencias - ? WHERE codigo = ?',
-            [objeto['cantidad'], objeto['productoCodigo']],
+            [cantidad, objeto['productoCodigo']],
+          );
+          await _registrarMovimiento(
+            txn,
+            productoCodigo: objeto['productoCodigo'] as String,
+            tipo: 'venta',
+            cantidad: -cantidad,
+            existenciasAnterior: existenciasAnteriores,
+            existenciasNuevas: existenciasAnteriores - cantidad,
+            ventaCodigo: ventaId,
+            usuarioId: venta['usuario_id'] as int?,
+            motivo: 'Venta registrada',
           );
         }
 
@@ -580,30 +677,62 @@ class Basededatos {
   static Future<Map<String, dynamic>> obtenerVentas() async {
     final db = await database;
     try {
-      final ventas = await db.query('ventas');
-      final List<Map<String, dynamic>> resultado = [];
+      final ventas = await db.rawQuery('''
+        SELECT
+          v.codigo AS ventaCodigo,
+          v.fecha,
+          v.total,
+          v.metodo_pago,
+          u.nombre AS usuarioNombre,
+          COALESCE(
+            GROUP_CONCAT(p.productoNombre || ' x' || vo.cantidad, ', '),
+            'Sin detalle de productos'
+          ) AS productosVendidos
+        FROM ventas v
+        LEFT JOIN venta_objetos vo ON vo.ventaCodigo = v.codigo
+        LEFT JOIN productos p ON p.codigo = vo.productoCodigo
+        LEFT JOIN usuarios u ON u.id = v.usuario_id
+        GROUP BY v.codigo, v.fecha, v.total, v.metodo_pago, u.nombre
+        ORDER BY v.codigo DESC
+      ''');
 
-      for (final venta in ventas) {
-        final items = await db.query(
-          'venta_objetos',
-          where: 'ventaCodigo = ?',
-          whereArgs: [venta['codigo']],
-        );
-        final v = Map<String, dynamic>.from(venta);
-        v['items'] = items;
-        resultado.add(v);
-      }
-
-      return {
-        'exito': true,
-        'mensaje': 'Ventas obtenidas',
-        'ventas': resultado,
-      };
+      return {'exito': true, 'mensaje': 'Ventas obtenidas', 'ventas': ventas};
     } catch (e) {
       return {
         'exito': false,
         'mensaje': 'Error obteniendo ventas: $e',
-        'ventas': [],
+        'ventas': {},
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> obtenerMovimientosInventario({
+    String? productoCodigo,
+  }) async {
+    final db = await database;
+    try {
+      final movimientos = await db.rawQuery('''
+        SELECT
+          m.*,
+          p.productoNombre,
+          u.nombre AS usuarioNombre
+        FROM movimientos_inventario m
+        INNER JOIN productos p ON p.codigo = m.producto_codigo
+        LEFT JOIN usuarios u ON u.id = m.usuario_id
+        ${productoCodigo == null ? '' : 'WHERE m.producto_codigo = ?'}
+        ORDER BY m.fecha DESC
+      ''', productoCodigo == null ? [] : [productoCodigo]);
+
+      return {
+        'exito': true,
+        'movimientos': movimientos,
+        'mensaje': 'Movimientos obtenidos',
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'movimientos': <Map<String, dynamic>>[],
+        'mensaje': 'Error obteniendo movimientos: $e',
       };
     }
   }
@@ -633,11 +762,39 @@ class Basededatos {
             continue;
           }
 
+          final codigo = producto['codigo'] as String;
+          final existente = await trans.query(
+            'productos',
+            columns: ['existencias'],
+            where: 'codigo = ?',
+            whereArgs: [codigo],
+            limit: 1,
+          );
+          final existenciasAnteriores = existente.isEmpty
+              ? 0
+              : existente.first['existencias'] as int;
+          final existenciasNuevas = producto['existencias'] as int? ?? 0;
+
           await trans.insert(
             'productos',
             producto,
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
+
+          final diferencia = existenciasNuevas - existenciasAnteriores;
+          if (diferencia != 0) {
+            await _registrarMovimiento(
+              trans,
+              productoCodigo: codigo,
+              tipo: existente.isEmpty ? 'alta' : 'ajuste',
+              cantidad: diferencia,
+              existenciasAnterior: existenciasAnteriores,
+              existenciasNuevas: existenciasNuevas,
+              motivo: existente.isEmpty
+                  ? 'Producto creado'
+                  : 'Producto actualizado',
+            );
+          }
         }
       });
     } catch (e) {
@@ -714,6 +871,15 @@ class Basededatos {
             {'existencias': cantidadNueva},
             where: 'codigo = ?',
             whereArgs: [codigo],
+          );
+          await _registrarMovimiento(
+            trans,
+            productoCodigo: codigo.toString(),
+            tipo: operacion.name,
+            cantidad: cantidadNueva - existenciasActuales,
+            existenciasAnterior: existenciasActuales,
+            existenciasNuevas: cantidadNueva,
+            motivo: 'Actualización de inventario',
           );
         }
 
@@ -1090,7 +1256,7 @@ class Basededatos {
 
   /// Reactiva productos previamente desactivados
   static Future<Map<String, dynamic>> actualizarExistencias(
-    int codigo,
+    String codigo,
     int cantidad,
     OperacionInventario operacion,
   ) async {
@@ -1100,6 +1266,21 @@ class Basededatos {
         cantidad = -cantidad;
       }
       await bd.transaction((tns) async {
+        final producto = await tns.query(
+          'productos',
+          columns: ['existencias'],
+          where: 'codigo = ?',
+          whereArgs: [codigo],
+          limit: 1,
+        );
+        if (producto.isEmpty) {
+          throw Exception('Producto con código $codigo no encontrado');
+        }
+        final existenciasAnteriores = producto.first['existencias'] as int;
+        final existenciasNuevas = operacion == OperacionInventario.actualizar
+            ? cantidad
+            : existenciasAnteriores + cantidad;
+
         await tns.rawUpdate(
           '''
         UPDATE productos
@@ -1108,6 +1289,15 @@ class Basededatos {
           WHERE codigo = ?
           ''',
           [cantidad, codigo],
+        );
+        await _registrarMovimiento(
+          tns,
+          productoCodigo: codigo.toString(),
+          tipo: operacion.name,
+          cantidad: existenciasNuevas - existenciasAnteriores,
+          existenciasAnterior: existenciasAnteriores,
+          existenciasNuevas: existenciasNuevas,
+          motivo: 'Actualización de existencias',
         );
       });
       return {
@@ -1148,10 +1338,7 @@ class Basededatos {
     Map<String, Object?> datos,
   ) async {
     if (codigo.trim().isEmpty) {
-      return {
-        'exito': false,
-        'mensaje': 'El código del producto es requerido',
-      };
+      return {'exito': false, 'mensaje': 'El código del producto es requerido'};
     }
 
     if (datos.isEmpty) {
@@ -1172,10 +1359,7 @@ class Basededatos {
       );
 
       if (productoActual.isEmpty) {
-        return {
-          'exito': false,
-          'mensaje': 'Producto no encontrado',
-        };
+        return {'exito': false, 'mensaje': 'Producto no encontrado'};
       }
 
       final cambios = <String, Object?>{};
@@ -1223,18 +1407,36 @@ class Basededatos {
         };
       }
 
-      final filasAfectadas = await db.update(
-        'productos',
-        cambios,
-        where: 'codigo = ?',
-        whereArgs: [codigo],
-      );
+      final filasAfectadas = await db.transaction((trans) async {
+        final filas = await trans.update(
+          'productos',
+          cambios,
+          where: 'codigo = ?',
+          whereArgs: [codigo],
+        );
+
+        if (cambios.containsKey('existencias')) {
+          final existenciasAnteriores =
+              productoActual.first['existencias'] as int;
+          final existenciasNuevas = cambios['existencias'] as int;
+          final diferencia = existenciasNuevas - existenciasAnteriores;
+          if (diferencia != 0) {
+            await _registrarMovimiento(
+              trans,
+              productoCodigo: codigo,
+              tipo: 'ajuste',
+              cantidad: diferencia,
+              existenciasAnterior: existenciasAnteriores,
+              existenciasNuevas: existenciasNuevas,
+              motivo: 'Edición de producto',
+            );
+          }
+        }
+        return filas;
+      });
 
       if (filasAfectadas == 0) {
-        return {
-          'exito': false,
-          'mensaje': 'No se pudo actualizar el producto',
-        };
+        return {'exito': false, 'mensaje': 'No se pudo actualizar el producto'};
       }
 
       return {
@@ -1243,10 +1445,7 @@ class Basededatos {
         'filas_afectadas': filasAfectadas,
       };
     } catch (e) {
-      return {
-        'exito': false,
-        'mensaje': 'Error al actualizar producto: $e',
-      };
+      return {'exito': false, 'mensaje': 'Error al actualizar producto: $e'};
     }
   }
 }

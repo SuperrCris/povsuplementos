@@ -24,7 +24,7 @@ class _ElementoCompraState extends State<ElementoCompra>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
-
+double ancho = 0;
   @override
   void initState() {
     super.initState();
@@ -54,16 +54,19 @@ class _ElementoCompraState extends State<ElementoCompra>
 
   @override
   Widget build(BuildContext context) {
+     ancho = MediaQuery.of(context).size.width;
     return ScaleTransition(
       scale: _scaleAnimation,
       child: Card(
           margin: EdgeInsets.only(bottom: 8),
           child: Padding(
             padding: EdgeInsets.all(8.0),
-            child: Row(
+            child: 
+            
+            ancho >= 600 ? Row(
               children: [
                 
-                SizedBox(
+              ancho >= 600 ? SizedBox(
                   width: 40,
                   height: 40,
                   child: ClipRRect(
@@ -77,8 +80,8 @@ class _ElementoCompraState extends State<ElementoCompra>
                             color: Colors.grey[200],
                             child: Icon(Icons.image, color: Colors.grey),
                           ),
-                  ),
-                ),
+                  ) 
+                ) : SizedBox.shrink(),
                 
                 SizedBox(width: 12),
                 
@@ -108,6 +111,8 @@ class _ElementoCompraState extends State<ElementoCompra>
                 
                 Row(
                   mainAxisSize: MainAxisSize.min,
+
+                
                   children: [
                     IconButton(
                       onPressed: () => widget.disminuir.call(widget.index),
@@ -140,7 +145,57 @@ class _ElementoCompraState extends State<ElementoCompra>
                   constraints: BoxConstraints(minWidth: 30),
                 ),
               ],
-            ),
+            ) : Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  widget.item.producto.productoNombre,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  '\$${widget.item.producto.precio.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    color: Colors.green,
+                    fontSize: 12,
+                  ),
+                ),
+                               SizedBox(height: 8),
+                                Row(
+                  mainAxisSize: MainAxisSize.min,
+
+                
+                  children: [
+                    IconButton(
+                      onPressed: () => widget.disminuir.call(widget.index),
+                      icon: Icon(Icons.remove_circle_outline, size: 20),
+                      constraints: BoxConstraints(minWidth: 30),
+                      padding: EdgeInsets.zero,
+                    ),
+                    
+                    SizedBox(
+                      width: 30,
+                      child: Text(
+                        '${widget.item.cantidad}',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    
+                    IconButton(
+                      onPressed: () => widget.agregar.call(widget.index),
+                      icon: Icon(Icons.add_circle_outline, size: 20),
+                      constraints: BoxConstraints(minWidth: 30),
+                      padding: EdgeInsets.zero,
+                    ),
+                  ],
+                ),
+              ],
+            )
           ),
         )
     );

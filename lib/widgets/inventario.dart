@@ -23,8 +23,6 @@ void actualizarSeleccionados(var codigo, bool seleccionado) {
   print('Seleccionados actualizados: $seleccionados');
 }
 
-
-
 class Inventario extends StatefulWidget {
   const Inventario({super.key});
   @override
@@ -242,7 +240,7 @@ class _InventarioState extends State<Inventario> {
     showDialog(
       context: context,
       builder: (context) => ActualizarExistencias(
-        codigo: int.tryParse(objeto.codigo) ?? -1,
+        codigo: objeto.codigo,
         cantidad: objeto.existencias,
         alTenerExito: () {
           setState(() {
@@ -305,7 +303,6 @@ class _InventarioState extends State<Inventario> {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     return Scaffold(
-
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: SingleChildScrollView(
@@ -361,8 +358,7 @@ class _InventarioState extends State<Inventario> {
                     2: {'nombre': 'BODY 2'},
                   }),
                   Tooltip(
-                    message: 
-                    seleccionados.isNotEmpty
+                    message: seleccionados.isNotEmpty
                         ? 'Eliminar ${seleccionados.length} ${seleccionados.length == 1 ? 'producto' : 'productos'} \n${seleccionados.join('\n')}'
                         : 'Sin productos por eliminar',
                     child: IconButton.filledTonal(
@@ -467,7 +463,6 @@ class _InventarioState extends State<Inventario> {
                             _cerrarMenuContextual();
                             setState(() {
                               if (_shiftEstaPresionado()) {
-
                                 if (seleccionados.contains(objeto.codigo)) {
                                   seleccionados.remove(objeto.codigo);
                                 } else {
@@ -475,26 +470,27 @@ class _InventarioState extends State<Inventario> {
                                   rango[0] = productosFiltrados.indexOf(objeto);
                                 }
                               } else if (_ctrlEstaPresionado()) {
-                                
-                                  seleccionados.add(objeto.codigo);
-                                   if (rango.length == 0) {
-                                     rango[0] = productosFiltrados.indexOf(objeto);
-                                   } else if (rango.length == 1) {
-                                     rango[1] = productosFiltrados.indexOf(objeto);
-                                   }
-                                  print(
-                                    'Rango actualizado: $rango',
-                                  );
-                                  if (rango.length > 2) {
-                                    rango.sort();
-                                    for (var i = rango[0] + 1; i < rango[1]; i++) {
-                                      seleccionados.add(productosFiltrados[i].codigo);
-                                    }
-                                    rango.clear();
+                                seleccionados.add(objeto.codigo);
+                                if (rango.length == 0) {
+                                  rango[0] = productosFiltrados.indexOf(objeto);
+                                } else if (rango.length == 1) {
+                                  rango[1] = productosFiltrados.indexOf(objeto);
+                                }
+                                print('Rango actualizado: $rango');
+                                if (rango.length > 2) {
+                                  rango.sort();
+                                  for (
+                                    var i = rango[0] + 1;
+                                    i < rango[1];
+                                    i++
+                                  ) {
+                                    seleccionados.add(
+                                      productosFiltrados[i].codigo,
+                                    );
                                   }
-                                
+                                  rango.clear();
+                                }
                               } else {
-                                
                                 if (!seleccionados.contains(objeto.codigo)) {
                                   seleccionados
                                     ..clear()

@@ -32,8 +32,10 @@ class GestorImagenes {
     }
   }
   
-  /// Guarda una imagen en el directorio local y retorna el nombre del archivo
+
   static Future<String> guardarImagen(String rutaOriginal, String nombreArchivo) async {
+
+    print('Guardando imagen: $rutaOriginal como $nombreArchivo');
     try {
       final File archivoOriginal = File(rutaOriginal);
       if (!await archivoOriginal.exists()) {
@@ -69,7 +71,8 @@ class GestorImagenes {
       
       await archivoOriginal.copy(archivoDestino.path);
       
-      return nombreArchivo;
+      print('Imagen guardada como: $nombreArchivoConExtension');
+      return nombreArchivoConExtension;
       
     } catch (e) {
       print('Error al guardar imagen: $e');

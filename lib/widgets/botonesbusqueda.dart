@@ -107,17 +107,16 @@ class _BotonesBusquedaState extends State<BotonesBusqueda> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return Container(
+      alignment: Alignment.topLeft,
       padding: const EdgeInsets.symmetric(horizontal: 6.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.start,
+      child: Wrap(
+        alignment: WrapAlignment.start,
         children: [
           for (int i = 0; i < etiquetas.length; i++) 
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 2),
-                child: _buildButton(i),
-              ),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 2),
+              child: _buildButton(i),
             ),
         ],
       ),

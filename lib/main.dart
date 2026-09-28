@@ -12,6 +12,7 @@ import 'package:pov_suplementos/widgets/busquedasucursales.dart';
 import 'package:pov_suplementos/widgets/carritodecompras.dart';
 import 'package:pov_suplementos/widgets/conexiones.dart';
 import 'package:pov_suplementos/widgets/inventario.dart';
+import 'package:pov_suplementos/widgets/inventario_plutogrid.dart';
 import 'package:pov_suplementos/widgets/ventanacompra.dart';
 import 'package:pov_suplementos/widgets/ventanareportes.dart';
 import 'package:pov_suplementos/widgets/ventanaterminalpago.dart';
@@ -43,10 +44,6 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   late ThemeMode _themeMode = widget.config["tema"];
   late int sucursal = widget.config["sucursal"];
-
-
-
-
 
   void toggleTheme() {
     setState(() {
@@ -190,10 +187,10 @@ class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey<RefreshIndicatorState> _refreshKey =
       GlobalKey<RefreshIndicatorState>();
   late Future<List<Objeto>> _productosFuture;
-  
+
   final TextEditingController _searchController = TextEditingController();
   String _filtroTexto = '';
-  
+
   Future<bool> ventanaTerminalPago(BuildContext context, double total) async {
     final resultado = await Navigator.push<bool>(
       context,
@@ -201,14 +198,16 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     return resultado ?? false;
   }
-  
+
   @override
   void initState() {
     super.initState();
     _productosFuture = obtenerInfo();
     _carritoController.setRefreshCallback(_actualizarTablaProductos);
-    _carritoController.setTerminalPagoCallback(() => ventanaTerminalPago(context, _carritoController.total));
-    
+    _carritoController.setTerminalPagoCallback(
+      () => ventanaTerminalPago(context, _carritoController.total),
+    );
+
     _searchController.addListener(() {
       setState(() {
         _filtroTexto = _searchController.text.toLowerCase();
@@ -252,23 +251,21 @@ class _HomeScreenState extends State<HomeScreen> {
       Objeto objetoactual = Objeto(
         codigo: producto['codigo'],
         productoNombre: producto['productoNombre'],
-        marcaNombre:  producto['marcaNombre'],
+        marcaNombre: producto['marcaNombre'],
         descripcion: producto['descripcion'] ?? '',
         precio: (producto['precio']?.toDouble()) ?? 0.0,
         imagen: producto['imagen'] ?? '',
         categoria: producto['categoria'],
         existencias: producto['existencias'],
-        activo: producto['activo'] == 1  ? true : false,
+        activo: producto['activo'] == 1 ? true : false,
       );
       for (var imageFile in images) {
-        if (producto['imagen'] != null &&
-            imageFile.path.contains(producto['imagen'])) {
+        final nombreImagen = producto['imagen']?.toString().trim() ?? '';
+        if (nombreImagen.isNotEmpty && imageFile.path.contains(nombreImagen)) {
           objetoactual.imagenWidget = Image.file(imageFile, fit: BoxFit.cover);
           break;
         } else {
-          print(
-            "no hubo imagen para el objeto: ${producto['productoNombre']}",
-          );
+          print("no hubo imagen para el objeto: ${producto['productoNombre']}");
         }
       }
       print(
@@ -281,14 +278,111 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<Objeto> _filtrarProductos(List<Objeto> productos) {
     if (_filtroTexto.isEmpty) {
+      productos.sort((a, b) {
+        final aEsSnack = a.categoria?.toLowerCase() == "snack";
+        final bEsSnack = b.categoria?.toLowerCase() == "snack";
+
+        if (aEsSnack && !bEsSnack) return -1;
+        if (!aEsSnack && bEsSnack) return 1;
+        return 0;
+      });
       return productos;
     }
-    
+
     return productos.where((producto) {
       return producto.codigo.toLowerCase().contains(_filtroTexto) ||
-             producto.productoNombre.toLowerCase().contains(_filtroTexto) ||
-             producto.marcaNombre.toLowerCase().contains(_filtroTexto);
+          producto.productoNombre.toLowerCase().contains(_filtroTexto) ||
+          producto.marcaNombre.toLowerCase().contains(_filtroTexto);
     }).toList();
+  }
+
+  Widget _tituloSeccion(String titulo, Color color) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+      child: Text(
+        titulo,
+        style: TextStyle(
+          color: color,
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _botonSuperior({
+    required String texto,
+    required VoidCallback onPressed,
+    required List<Color> colores,
+    required List<Color> coloresHover,
+  }) {
+    var estaSobreElBoton = false;
+
+    return StatefulBuilder(
+      builder: (context, setStateLocal) {
+        return ElevatedButton(
+          onPressed: onPressed,
+          onHover: (hovered) {
+            setStateLocal(() => estaSobreElBoton = hovered);
+          },
+          style: ElevatedButton.styleFrom(
+            padding: EdgeInsets.zero,
+            elevation: 0,
+            backgroundColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(45),
+            ),
+          ),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(45),
+              gradient: LinearGradient(
+                colors: estaSobreElBoton ? coloresHover : colores,
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+            child: Text(
+              texto,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  SliverGrid _rejillaProductos(
+    BuildContext context,
+    List<Objeto> productos, {
+    required bool snacks,
+  }) {
+    final anchoTarjeta = 300;
+    final columnas = (MediaQuery.of(context).size.width / anchoTarjeta)
+        .floor()
+        .clamp(1, 8);
+
+    return SliverGrid(
+      delegate: SliverChildBuilderDelegate((context, index) {
+        final objeto = productos[index];
+        return WidgetVenta(
+          objeto: objeto,
+          callback: () => _agregarAlCarrito(objeto),
+        );
+      }, childCount: productos.length),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: columnas,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        mainAxisExtent: snacks ? 96 : 250,
+      ),
+    );
   }
 
   @override
@@ -334,7 +428,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Expanded(child: SizedBox()),
                 Expanded(
                   child: Row(
-                    spacing: 10,
+                    spacing: 10.0,
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       IconButton(
@@ -364,97 +458,80 @@ class _HomeScreenState extends State<HomeScreen> {
                 Expanded(
                   child: Column(
                     children: [
-                      Padding(
+                      Container(
                         padding: const EdgeInsets.all(8.0),
-                        child: Row(
-                            spacing: 10,
-                            children: [
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>Inventario() ),
-                                  );
-                                },
-                                child: Container(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 8.0,
-                                    vertical: 4.0,
+                        alignment: Alignment.topLeft,
+                        child: Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.start,
+                          alignment: WrapAlignment.start,
+                          direction: Axis.horizontal,
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: [
+                            _botonSuperior(
+                              texto: '📄 Inventario',
+                              colores: const [
+                                Color.fromARGB(255, 1, 204, 45),
+                                Color.fromARGB(255, 23, 161, 57),
+                              ],
+                              coloresHover: const [
+                                Color.fromARGB(255, 36, 224, 77),
+                                Color.fromARGB(255, 34, 188, 70),
+                              ],
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => InventarioPlutoGrid(),
                                   ),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(45),
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        Color.fromARGB(255, 1, 204, 45),
-                                        Color.fromARGB(255, 23, 161, 57),
-                                      ],
-                                      stops: [0, 1],
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
+                                );
+                              },
+                            ),
+
+                            _botonSuperior(
+                              texto: '📖 Reporte',
+                              colores: const [
+                                Color.fromARGB(255, 255, 158, 32),
+                                Color.fromARGB(255, 245, 140, 3),
+                              ],
+                              coloresHover: const [
+                                Color.fromARGB(255, 255, 181, 67),
+                                Color.fromARGB(255, 255, 160, 24),
+                              ],
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => Reporte(
+                                      tipo: TipoReporte.ultimoreporte,
                                     ),
                                   ),
-                                  child: Text(
-                                    '📄 Inventario',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w800,
-                                    ),
+                                );
+                              },
+                            ),
+                            _botonSuperior(
+                              texto: '+',
+                              colores: const [
+                                Color(0xFF0F0CDA),
+                                Color(0xFF1720A1),
+                              ],
+                              coloresHover: const [
+                                Color(0xFF514EFF),
+                                Color(0xFF5661D9),
+                              ],
+                              onPressed: () {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => Agregarobjeto(
+                                    alTenerExito: () {
+                                      _actualizarTablaProductos();
+                                    },
                                   ),
-                                ),
-                              ),
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => Reporte(
-                                        tipo: TipoReporte.ultimoreporte,
-                                      ),
-                                    ),
-                                  );
-                                },
-                                child: Container(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 8.0,
-                                    vertical: 4.0,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(45),
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        Color.fromARGB(255, 255, 158, 32),
-                                        Color.fromARGB(255, 245, 140, 3),
-                                      ],
-                                      stops: [0, 1],
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                    ),
-                                  ),
-                                  child: Text(
-                                    '📖 Reporte',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              ElevatedButton(
-                                onPressed: () {
-                                  showDialog(
-                                    context: context,
-                                    builder: (context) => Agregarobjeto(
-                                      alTenerExito: () {
-                                        _actualizarTablaProductos();
-                                      },
-                                    ),
-                                  );
-                                },
-                                child: Text('+'),
-                              ),
-                            ],
-                          ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                       SizedBox(height: 2),
                       Divider(height: 2, color: Colors.blue.shade100),
@@ -490,7 +567,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                       width: 2.5,
                                     ),
                                   ),
-                                  labelText: 'Buscar por código, nombre o marca...',
+                                  labelText:
+                                      'Buscar por código, nombre o marca...',
                                   labelStyle: TextStyle(
                                     color: Colors.blue.shade600,
                                     fontWeight: FontWeight.w500,
@@ -522,7 +600,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                           ),
-                      //    Busquedasucursales(),
+                          //    Busquedasucursales(),
                           SizedBox(width: 10),
                         ],
                       ),
@@ -554,12 +632,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                   snapshot.data!.isEmpty) {
                                 return Center(child: Text('No hay productos'));
                               } else {
-                                final productosFiltrados = _filtrarProductos(snapshot.data!);
-                                
-                                if (productosFiltrados.isEmpty && _filtroTexto.isNotEmpty) {
+                                final productosFiltrados = _filtrarProductos(
+                                  snapshot.data!,
+                                );
+
+                                if (productosFiltrados.isEmpty &&
+                                    _filtroTexto.isNotEmpty) {
                                   return Center(
                                     child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         Icon(
                                           Icons.search_off,
@@ -580,36 +662,55 @@ class _HomeScreenState extends State<HomeScreen> {
                                   );
                                 }
 
-                                
-                                return Padding(
-                                  padding: const EdgeInsets.all(8.0),
-                                  child: GridView.builder(
-                                    gridDelegate:
-                                        SliverGridDelegateWithFixedCrossAxisCount(
-                                          crossAxisCount:
-                                              MediaQuery.of(
-                                                    context,
-                                                  ).size.width >
-                                                  300
-                                              ? MediaQuery.of(
-                                                      context,
-                                                    ).size.width ~/
-                                                    300
-                                              : 1,
-                                          crossAxisSpacing: 8.0,
-                                          mainAxisSpacing: 8.0,
-                                          childAspectRatio: 0.6,
+                                final snacks = productosFiltrados
+                                    .where(
+                                      (producto) =>
+                                          producto.categoria?.toLowerCase() ==
+                                          'snack',
+                                    )
+                                    .toList();
+                                final demas = productosFiltrados
+                                    .where(
+                                      (producto) =>
+                                          producto.categoria?.toLowerCase() !=
+                                          'snack',
+                                    )
+                                    .toList();
+
+                                return CustomScrollView(
+                                  physics:
+                                      const AlwaysScrollableScrollPhysics(),
+                                  slivers: [
+                                    if (snacks.isNotEmpty) ...[
+                                      SliverToBoxAdapter(
+                                        child: _tituloSeccion(
+                                          'Snacks',
+                                          const Color.fromARGB(255, 22, 1, 107),
                                         ),
-                                    itemCount: productosFiltrados.length,
-                                    itemBuilder: (context, index) {
-                                      final objeto = productosFiltrados[index];
-                                      return WidgetVenta(
-                                        objeto: objeto,
-                                        callback: () =>
-                                            _agregarAlCarrito(objeto),
-                                      );
-                                    },
-                                  ),
+                                      ),
+                                      _rejillaProductos(
+                                        context,
+                                        snacks,
+                                        snacks: true,
+                                      ),
+                                    ],
+                                    if (demas.isNotEmpty) ...[
+                                      SliverToBoxAdapter(
+                                        child: _tituloSeccion(
+                                          'Suplementos',
+                                          Colors.blue.shade700,
+                                        ),
+                                      ),
+                                      _rejillaProductos(
+                                        context,
+                                        demas,
+                                        snacks: false,
+                                      ),
+                                    ],
+                                    const SliverPadding(
+                                      padding: EdgeInsets.only(bottom: 8),
+                                    ),
+                                  ],
                                 );
                               }
                             },
