@@ -11,7 +11,7 @@ import 'package:pov_suplementos/widgets/botonusuario.dart';
 import 'package:pov_suplementos/widgets/busquedasucursales.dart';
 import 'package:pov_suplementos/widgets/carritodecompras.dart';
 import 'package:pov_suplementos/widgets/conexiones.dart';
-import 'package:pov_suplementos/widgets/inventario.dart';
+import 'package:pov_suplementos/widgets/agregarsalidas.dart';
 import 'package:pov_suplementos/widgets/inventario_plutogrid.dart';
 import 'package:pov_suplementos/widgets/ventanacompra.dart';
 import 'package:pov_suplementos/widgets/ventanareportes.dart';
@@ -522,7 +522,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               onPressed: () {
                                 showDialog(
                                   context: context,
-                                  builder: (context) => Agregarobjeto(
+                                  builder: (context) => agregarSalidas(
                                     alTenerExito: () {
                                       _actualizarTablaProductos();
                                     },

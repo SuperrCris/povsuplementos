@@ -11,7 +11,7 @@ enum OperacionInventario { agregar, restar, actualizar }
 class Basededatos {
   static Database? _database;
   static const String _databaseName = 'pov_suplementos.db';
-  static const int _databaseVersion = 11;
+  static const int _databaseVersion = 13;
 
   static final List<Map<String, dynamic>> _productosIniciales = [
     {
@@ -193,6 +193,56 @@ class Basededatos {
         ''');
       }
     }
+
+    if (versionAntigua < 12) {
+      await bd.execute('''
+        CREATE TABLE IF NOT EXISTS salidas (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          monto REAL NOT NULL,
+          concepto TEXT NOT NULL,
+          categoria TEXT,
+          fecha TEXT NOT NULL,
+          metodo_pago TEXT NOT NULL DEFAULT 'efectivo',
+          usuario_id INTEGER NOT NULL,
+          sucursal INTEGER NOT NULL DEFAULT 1,
+          FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+        )
+      ''');
+    }
+
+    if (versionAntigua < 13) {
+      await bd.execute('''
+        CREATE TABLE movimientos_inventario_nuevo (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          producto_codigo TEXT,
+          tipo TEXT NOT NULL,
+          cantidad INTEGER NOT NULL,
+          existencias_anterior INTEGER NOT NULL,
+          existencias_nuevas INTEGER NOT NULL,
+          venta_codigo INTEGER,
+          usuario_id INTEGER,
+          motivo TEXT,
+          fecha TEXT NOT NULL,
+          FOREIGN KEY (producto_codigo) REFERENCES productos(codigo) ON DELETE RESTRICT,
+          FOREIGN KEY (venta_codigo) REFERENCES ventas(codigo) ON DELETE SET NULL,
+          FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
+        )
+      ''');
+      await bd.execute('''
+        INSERT INTO movimientos_inventario_nuevo (
+          id, producto_codigo, tipo, cantidad, existencias_anterior,
+          existencias_nuevas, venta_codigo, usuario_id, motivo, fecha
+        )
+        SELECT
+          id, producto_codigo, tipo, cantidad, existencias_anterior,
+          existencias_nuevas, venta_codigo, usuario_id, motivo, fecha
+        FROM movimientos_inventario
+      ''');
+      await bd.execute('DROP TABLE movimientos_inventario');
+      await bd.execute(
+        'ALTER TABLE movimientos_inventario_nuevo RENAME TO movimientos_inventario',
+      );
+    }
   }
 
   /// Crea todas las tablas necesarias en la base de datos
@@ -256,7 +306,7 @@ class Basededatos {
     await bd.execute('''
       CREATE TABLE movimientos_inventario (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        producto_codigo TEXT NOT NULL,
+        producto_codigo TEXT,
         tipo TEXT NOT NULL,
         cantidad INTEGER NOT NULL,
         existencias_anterior INTEGER NOT NULL,
@@ -268,6 +318,20 @@ class Basededatos {
         FOREIGN KEY (producto_codigo) REFERENCES productos(codigo) ON DELETE RESTRICT,
         FOREIGN KEY (venta_codigo) REFERENCES ventas(codigo) ON DELETE SET NULL,
         FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
+      )
+    ''');
+
+    await bd.execute('''
+      CREATE TABLE salidas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        monto REAL NOT NULL,
+        concepto TEXT NOT NULL,
+        categoria TEXT,
+        fecha TEXT NOT NULL,
+        metodo_pago TEXT NOT NULL DEFAULT 'efectivo',
+        usuario_id INTEGER NOT NULL,
+        sucursal INTEGER NOT NULL DEFAULT 1,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
       )
     ''');
 
@@ -300,6 +364,8 @@ class Basededatos {
         FOREIGN KEY (producto_id) REFERENCES productos(codigo) ON DELETE RESTRICT
       )
     ''');
+
+
 
     await _crearUsuarioAdmin(bd);
     await _insertarProductosIniciales(bd);
@@ -674,9 +740,23 @@ class Basededatos {
     }
   }
 
-  static Future<Map<String, dynamic>> obtenerVentas() async {
+  static Future<Map<String, dynamic>> obtenerVentas([
+    DateTime? desde,
+    DateTime? hasta,
+  ]) async {
     final db = await database;
     try {
+      final condiciones = <String>[];
+      final argumentos = <String>[];
+      if (desde != null) {
+        condiciones.add('v.fecha >= ?');
+        argumentos.add(desde.toIso8601String());
+      }
+      if (hasta != null) {
+        condiciones.add('v.fecha <= ?');
+        argumentos.add(hasta.toIso8601String());
+      }
+
       final ventas = await db.rawQuery('''
         SELECT
           v.codigo AS ventaCodigo,
@@ -692,9 +772,10 @@ class Basededatos {
         LEFT JOIN venta_objetos vo ON vo.ventaCodigo = v.codigo
         LEFT JOIN productos p ON p.codigo = vo.productoCodigo
         LEFT JOIN usuarios u ON u.id = v.usuario_id
+        ${condiciones.isEmpty ? '' : 'WHERE ${condiciones.join(' AND ')}'}
         GROUP BY v.codigo, v.fecha, v.total, v.metodo_pago, u.nombre
         ORDER BY v.codigo DESC
-      ''');
+      ''', argumentos);
 
       return {'exito': true, 'mensaje': 'Ventas obtenidas', 'ventas': ventas};
     } catch (e) {
@@ -717,7 +798,7 @@ class Basededatos {
           p.productoNombre,
           u.nombre AS usuarioNombre
         FROM movimientos_inventario m
-        INNER JOIN productos p ON p.codigo = m.producto_codigo
+        LEFT JOIN productos p ON p.codigo = m.producto_codigo
         LEFT JOIN usuarios u ON u.id = m.usuario_id
         ${productoCodigo == null ? '' : 'WHERE m.producto_codigo = ?'}
         ORDER BY m.fecha DESC
@@ -972,6 +1053,75 @@ class Basededatos {
     }
   }
 
+  static Future<Map<String, dynamic>> crearReporteFaltantes({
+    required int creadoPor,
+    required List<Map<String, dynamic>> productos,
+  }) async {
+    final db = await database;
+
+    try {
+      return await db.transaction((txn) async {
+        final detalles = <Map<String, dynamic>>[];
+        for (final producto in productos) {
+          final codigo = producto['codigo'] as String;
+          final cantidadEsperada = producto['cantidadEsperada'] as int;
+          final cantidadReal = producto['cantidadReal'] as int;
+          if (cantidadEsperada < 0 || cantidadReal < 0) continue;
+
+          final existe = await txn.query(
+            'productos',
+            columns: ['codigo'],
+            where: 'codigo = ?',
+            whereArgs: [codigo],
+            limit: 1,
+          );
+          if (existe.isEmpty || cantidadEsperada == cantidadReal) continue;
+
+          detalles.add({
+            'producto_id': codigo,
+            'cantidad_anterior': cantidadEsperada,
+            'cantidad_indicada': cantidadEsperada,
+            'cantidad_real': cantidadReal,
+            'motivo': 'Diferencia detectada en inventario',
+          });
+        }
+
+        if (detalles.isEmpty) {
+          return {
+            'exito': false,
+            'mensaje': 'No hay productos modificados para reportar',
+          };
+        }
+
+        final reporteId = await txn.insert('reportes', {
+          'tipo_reporte': 'inventario',
+          'creado_por': creadoPor,
+          'titulo': 'Reporte de faltantes',
+          'descripcion': 'Productos reportados como faltantes',
+          'fecha_creacion': DateTime.now().toIso8601String(),
+          'estado': 'generado',
+        });
+
+        for (final detalle in detalles) {
+          await txn.insert('reportes_inventario', {
+            'reporte_id': reporteId,
+            ...detalle,
+            'fecha_registro': DateTime.now().toIso8601String(),
+          });
+        }
+
+        return {
+          'exito': true,
+          'reporteId': reporteId,
+          'productosIncluidos': detalles.length,
+          'mensaje': 'Reporte de faltantes creado exitosamente',
+        };
+      });
+    } catch (e) {
+      return {'exito': false, 'mensaje': 'Error al crear reporte: $e'};
+    }
+  }
+
   static Future<Map<String, dynamic>> agregarDetalleReporte({
     required int reporteId,
     required String productoId,
@@ -1043,6 +1193,145 @@ class Basededatos {
       });
     } catch (e) {
       return {'exito': false, 'mensaje': 'Error al generar reporte: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> guardarSalidasEfectivo({
+    required String concepto,
+    required double monto,
+    String? categoria,
+    String metodoPago = 'efectivo',
+    int? sucursal,
+    DateTime? fecha,
+  }) async {
+    if (concepto.trim().isEmpty || monto <= 0) {
+      return {
+        'exito': false,
+        'mensaje': 'El concepto y el monto deben ser válidos',
+      };
+    }
+
+    try {
+      final db = await database;
+      final usuarioId = Autenticacion().id;
+      if (usuarioId <= 0) {
+        return {'exito': false, 'mensaje': 'No hay un usuario autenticado'};
+      }
+
+      final salidaId = await db.insert('salidas', {
+        'concepto': concepto,
+        'monto': monto,
+        'categoria': categoria,
+        'fecha': (fecha ?? DateTime.now()).toIso8601String(),
+        'metodo_pago': metodoPago,
+        'usuario_id': usuarioId,
+        'sucursal': sucursal ?? 1,
+      });
+
+      return {
+        'exito': true,
+        'mensaje': 'Salida de efectivo registrada',
+        'id': salidaId,
+      };
+    } catch (e) {
+      return {'exito': false, 'mensaje': 'Error al registrar salida de efectivo: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> obtenerVentasYSalidas({
+    DateTime? desde,
+    DateTime? hasta,
+    int? sucursal,
+  }) async {
+    try {
+      final resultadoVentas = await obtenerVentas(desde, hasta);
+      final ventas = resultadoVentas['ventas'];
+      final db = await database;
+      final condiciones = <String>[];
+      final argumentos = <Object?>[];
+
+      if (desde != null) {
+        condiciones.add('s.fecha >= ?');
+        argumentos.add(desde.toIso8601String());
+      }
+      if (hasta != null) {
+        condiciones.add('s.fecha <= ?');
+        argumentos.add(hasta.toIso8601String());
+      }
+      if (sucursal != null) {
+        condiciones.add('s.sucursal = ?');
+        argumentos.add(sucursal);
+      }
+
+      final salidas = await db.rawQuery('''
+        SELECT
+          s.id,
+          s.monto,
+          s.concepto,
+          s.categoria,
+          s.fecha,
+          s.metodo_pago,
+          u.nombre AS usuarioNombre
+        FROM salidas s
+        LEFT JOIN usuarios u ON u.id = s.usuario_id
+        ${condiciones.isEmpty ? '' : 'WHERE ${condiciones.join(' AND ')}'}
+        ORDER BY s.fecha DESC
+      ''', argumentos);
+
+      final movimientos = <Map<String, dynamic>>[];
+      if (ventas is List) {
+        movimientos.addAll(
+          ventas.whereType<Map>().map(
+            (venta) => {
+              'id': venta['ventaCodigo'],
+              'tipo': 'venta',
+              'naturaleza': 'ingreso',
+              'producto_codigo': null,
+              'productoNombre': null,
+              'concepto': venta['productosVendidos'] ?? 'Venta',
+              'cantidad': null,
+              'monto': (venta['total'] as num?)?.toDouble() ?? 0.0,
+              'fecha': venta['fecha'],
+              'metodo_pago': venta['metodo_pago'],
+              'usuarioNombre': venta['usuarioNombre'],
+            },
+          ),
+        );
+      }
+      movimientos.addAll(
+        salidas.map(
+          (salida) => {
+            'id': salida['id'],
+            'tipo': 'salida_efectivo',
+            'naturaleza': 'egreso',
+            'producto_codigo': null,
+            'productoNombre': null,
+            'concepto': salida['concepto'],
+            'cantidad': null,
+            'monto': (salida['monto'] as num?)?.toDouble() ?? 0.0,
+            'fecha': salida['fecha'],
+            'metodo_pago': salida['metodo_pago'],
+            'usuarioNombre': salida['usuarioNombre'],
+          },
+        ),
+      );
+      movimientos.sort((a, b) {
+        final fechaA = DateTime.tryParse(a['fecha']?.toString() ?? '');
+        final fechaB = DateTime.tryParse(b['fecha']?.toString() ?? '');
+        return (fechaB ?? DateTime(0)).compareTo(fechaA ?? DateTime(0));
+      });
+
+      return {
+        'exito': true,
+        'movimientos': movimientos,
+        'mensaje': 'Ventas y salidas obtenidas',
+      };
+    } catch (e) {
+      return {
+        'exito': false,
+        'movimientos': <Map<String, dynamic>>[],
+        'mensaje': 'Error obteniendo ventas y salidas: $e',
+      };
     }
   }
 

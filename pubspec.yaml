@@ -20,6 +20,7 @@ dependencies:
   auto_size_text: ^3.0.0
   http: ^1.6.0
   pluto_grid: ^8.1.0
+  time_range_picker: 2.3.1
 
 
 dev_dependencies:
