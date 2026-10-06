@@ -1,9 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 import 'package:pov_suplementos/estructuras/objeto.dart';
 import 'package:pov_suplementos/funciones/basededatos.dart';
+import 'package:pov_suplementos/funciones/gestor_imagenes.dart';
 import 'package:pov_suplementos/widgets/agregarobjeto.dart';
 import 'package:pov_suplementos/widgets/reportefaltantes.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class InventarioPlutoGrid extends StatefulWidget {
   const InventarioPlutoGrid({super.key});
@@ -20,6 +25,7 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
   static const _precio = 'precio';
   static const _existencias = 'existencias';
   static const _activo = 'activo';
+  static const _imagen = 'imagen';
   static const _metodoPago = 'metodoPago';
   static const _productosVendidos = 'productosVendidos';
   static const _usuario = 'usuario';
@@ -27,6 +33,11 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
   static const _tipoMovimiento = 'tipoMovimiento';
   static const _cantidadMovimiento = 'cantidadMovimiento';
   static const _montoMovimiento = 'montoMovimiento';
+  static const _fechaDesdeGuardada = 'inventario_fecha_desde';
+  static const _fechaHastaGuardada = 'inventario_fecha_hasta';
+  static const _horarios = {"mañana":["05:00","13:30"],
+                            "tarde":["13:30","21:00"]
+  };
 
   bool verDesactivados = true;
 
@@ -48,16 +59,52 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
   List<Map<String, dynamic>> _movimientos = [];
   DateTime? _fechaDesde;
   DateTime? _fechaHasta;
+  double _subtotal = 0;
+  double _salida = 0;
+  double _entrada = 0;
+  double _impuestos = 0;
   double _total = 0;
 
   @override
   void initState() {
     super.initState();
+    _restaurarRangoFechas();
     _cargarProductos();
     obtenerVentas();
     obtenerSalidas();
     obtenerMovimientos();
     _calcularTotal();
+  }
+
+  Future<void> _restaurarRangoFechas() async {
+    final preferencias = await SharedPreferences.getInstance();
+    final desde = preferencias.getInt(_fechaDesdeGuardada);
+    final hasta = preferencias.getInt(_fechaHastaGuardada);
+    if (!mounted || desde == null || hasta == null) return;
+
+    setState(() {
+      _fechaDesde = DateTime.fromMillisecondsSinceEpoch(desde);
+      _fechaHasta = DateTime.fromMillisecondsSinceEpoch(hasta);
+    });
+    _actualizarFilas();
+  }
+
+  Future<void> _guardarRangoFechas() async {
+    final preferencias = await SharedPreferences.getInstance();
+    if (_fechaDesde == null || _fechaHasta == null) {
+      await preferencias.remove(_fechaDesdeGuardada);
+      await preferencias.remove(_fechaHastaGuardada);
+      return;
+    }
+
+    await preferencias.setInt(
+      _fechaDesdeGuardada,
+      _fechaDesde!.millisecondsSinceEpoch,
+    );
+    await preferencias.setInt(
+      _fechaHastaGuardada,
+      _fechaHasta!.millisecondsSinceEpoch,
+    );
   }
 
   @override
@@ -173,23 +220,40 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
     final movimientos = resultado['movimientos'];
     if (movimientos is! List) {
       if (!mounted) return;
-      setState(() => _total = 0);
+      setState(() {
+        _subtotal = 0;
+        _salida = 0;
+        _entrada = 0;
+        _impuestos = 0;
+        _total = 0;
+      });
       return;
     }
 
-    final total = movimientos.fold<double>(
-      0.0,
-      (sum, movimiento) {
-        if (movimiento is! Map) return sum;
-        final monto = (movimiento['monto'] as num?)?.toDouble() ?? 0.0;
-        return movimiento['naturaleza'] == 'egreso'
-            ? sum - monto
-            : sum + monto;
-      },
-    );
+    var subtotal = 0.0;
+    var salida = 0.0;
+    var entrada = 0.0;
+    var impuestos = 0.0;
+    for (final movimiento in movimientos) {
+      if (movimiento is! Map) continue;
+      final monto = (movimiento['monto'] as num?)?.toDouble() ?? 0.0;
+      if (movimiento['naturaleza'] == 'egreso') {
+        salida += monto;
+      } else {
+        subtotal += (movimiento['subtotal'] as num?)?.toDouble() ?? monto;
+        impuestos += (movimiento['impuesto'] as num?)?.toDouble() ?? 0.0;
+        entrada += monto;
+      }
+    }
 
     if (!mounted) return;
-    setState(() => _total = total);
+    setState(() {
+      _subtotal = subtotal;
+      _salida = salida;
+      _entrada = entrada;
+      _impuestos = impuestos;
+      _total = entrada - salida;
+    });
   }
 
   Future<void> _actualizarFilas() async {
@@ -575,6 +639,355 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
     ].where((fila) => fila.checked == true).toList();
   }
 
+  void _editarSeleccionados() {
+    final filasSeleccionadas = _filasSeleccionadas;
+    if (filasSeleccionadas.isEmpty || !mounted) return;
+
+    final ediciones = filasSeleccionadas.map((fila) {
+      final codigo = fila.cells[_codigo]?.value?.toString() ?? '';
+      final producto = _productos.firstWhere((item) => item.codigo == codigo);
+
+      return <String, dynamic>{
+        _codigo: codigo,
+        _nombre: fila.cells[_nombre]?.value?.toString() ?? '',
+        _marca: fila.cells[_marca]?.value?.toString() ?? '',
+        _categoria: fila.cells[_categoria]?.value?.toString() ?? '',
+        _precio: fila.cells[_precio]?.value?.toString() ?? '',
+        _existencias: fila.cells[_existencias]?.value?.toString() ?? '',
+        _activo: fila.cells[_activo]?.value?.toString() ?? 'Activo',
+        _imagen: producto.imagen,
+        '_imagenRutaNueva': null,
+        '_imagenNombreNuevo': null,
+      };
+    }).toList();
+
+    final pageController = PageController();
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final tamanoPantalla = MediaQuery.sizeOf(dialogContext);
+        final anchoDialogo = tamanoPantalla.width < 760
+            ? tamanoPantalla.width * 0.82
+            : 720.0;
+        final altoDialogo = tamanoPantalla.height < 650
+            ? tamanoPantalla.height * 0.55
+            : 420.0;
+        var paginaActual = 0;
+        final messenger = ScaffoldMessenger.of(context);
+
+        Future<ImageProvider?> obtenerImagenProducto(String nombreImagen) async {
+          final imagenGuardada = await GestorImagenes.obtenerImageProvider(
+            nombreImagen,
+          );
+          if (imagenGuardada != null) return imagenGuardada;
+
+          final imagenActivos = File(
+            '${Directory.current.path}${Platform.pathSeparator}activos'
+            '${Platform.pathSeparator}$nombreImagen',
+          );
+          if (await imagenActivos.exists()) {
+            return FileImage(imagenActivos);
+          }
+          return null;
+        }
+
+        Future<bool> guardarEdicion(Map<String, dynamic> edicion) async {
+          final precio = double.tryParse(edicion[_precio].toString());
+          final existencias = int.tryParse(
+            edicion[_existencias].toString(),
+          );
+
+          if (edicion[_nombre].toString().trim().isEmpty ||
+              edicion[_marca].toString().trim().isEmpty ||
+              edicion[_categoria].toString().trim().isEmpty ||
+              precio == null ||
+              precio < 0 ||
+              existencias == null ||
+              existencias < 0) {
+            messenger.showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Revisa los datos: nombre, marca, categoría, precio y existencias.',
+                ),
+              ),
+            );
+            return false;
+          }
+
+          final datos = <String, Object?>{
+            'productoNombre': edicion[_nombre].toString().trim(),
+            'marcaNombre': edicion[_marca].toString().trim(),
+            'categoria': edicion[_categoria].toString().trim(),
+            'precio': precio,
+            'existencias': existencias,
+            'activo': edicion[_activo] == 'Activo' ? 1 : 0,
+          };
+
+          final rutaImagenNueva = edicion['_imagenRutaNueva'] as String?;
+          if (rutaImagenNueva != null) {
+            final nombreImagen = edicion['_imagenNombreNuevo'] as String?;
+            if (nombreImagen == null || nombreImagen.isEmpty) {
+              messenger.showSnackBar(
+                const SnackBar(
+                  content: Text('La imagen seleccionada no es válida.'),
+                ),
+              );
+              return false;
+            }
+
+            final imagenGuardada = await GestorImagenes.guardarImagen(
+              rutaImagenNueva,
+              nombreImagen,
+            );
+            datos[_imagen] = imagenGuardada;
+            edicion[_imagen] = imagenGuardada;
+            edicion['_imagenRutaNueva'] = null;
+            edicion['_imagenNombreNuevo'] = null;
+          }
+
+          final resultado = await Basededatos.actualizarProducto(
+            edicion[_codigo].toString(),
+            datos,
+          );
+
+          if (resultado['exito'] != true) {
+            messenger.showSnackBar(
+              SnackBar(content: Text(resultado['mensaje'].toString())),
+            );
+            return false;
+          }
+          return true;
+        }
+
+        return StatefulBuilder(
+          builder: (context, actualizarDialogo) {
+            return AlertDialog(
+              title: Text(
+                'Editar productos (${ediciones.length})',
+              ),
+              content: SizedBox(
+                width: anchoDialogo,
+                height: altoDialogo,
+                child: PageView.builder(
+                  controller: pageController,
+                  itemCount: ediciones.length,
+                  onPageChanged: (indice) {
+                    actualizarDialogo(() => paginaActual = indice);
+                  },
+                  itemBuilder: (context, index) {
+                    final edicion = ediciones[index];
+
+                    Widget campoTexto(
+                      String clave,
+                      String etiqueta, {
+                      TextInputType? tipoTeclado,
+                    }) {
+                      return TextFormField(
+                        initialValue: edicion[clave]?.toString() ?? '',
+                        keyboardType: tipoTeclado,
+                        decoration: InputDecoration(labelText: etiqueta),
+                        onChanged: (valor) => edicion[clave] = valor,
+                      );
+                    }
+
+                    Widget imagenProducto() {
+                      final rutaNueva = edicion['_imagenRutaNueva'] as String?;
+                      if (rutaNueva != null) {
+                        return Image.file(File(rutaNueva), fit: BoxFit.cover);
+                      }
+
+                      final nombreImagen = edicion[_imagen].toString();
+                      if (nombreImagen.isEmpty) {
+                        return const Center(
+                          child: Icon(Icons.image_not_supported_outlined),
+                        );
+                      }
+
+                      return FutureBuilder<ImageProvider?>(
+                        future: obtenerImagenProducto(nombreImagen),
+                        builder: (context, snapshot) {
+                          final imagen = snapshot.data;
+                          if (imagen == null) {
+                            return const Center(
+                              child: Icon(Icons.image_not_supported_outlined),
+                            );
+                          }
+                          return Image(image: imagen, fit: BoxFit.cover);
+                        },
+                      );
+                    }
+
+                    return SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Producto ${index + 1} de ${ediciones.length}',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 12),
+                          Text('Código: ${edicion[_codigo]}'),
+                          const SizedBox(height: 12),
+                          Center(
+                            child: Column(
+                              children: [
+                                SizedBox(
+                                  width: 180,
+                                  height: 180,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Container(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .surfaceContainerHighest,
+                                      child: imagenProducto(),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                OutlinedButton.icon(
+                                  onPressed: () async {
+                                    final resultado = await FilePicker.platform
+                                        .pickFiles(
+                                          type: FileType.image,
+                                          allowMultiple: false,
+                                        );
+                                    if (resultado == null ||
+                                        resultado.files.isEmpty ||
+                                        !context.mounted) {
+                                      return;
+                                    }
+
+                                    final archivo = resultado.files.first;
+                                    final ruta = archivo.path;
+                                    if (ruta == null) return;
+
+                                    actualizarDialogo(() {
+                                      edicion['_imagenRutaNueva'] = ruta;
+                                      edicion['_imagenNombreNuevo'] = archivo.name;
+                                    });
+                                  },
+                                  icon: const Icon(Icons.upload_file),
+                                  label: Text(
+                                    edicion['_imagenNombreNuevo']?.toString() ??
+                                        'Cambiar imagen',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          campoTexto(_nombre, 'Nombre'),
+                          const SizedBox(height: 12),
+                          campoTexto(_marca, 'Marca'),
+                          const SizedBox(height: 12),
+                          campoTexto(_categoria, 'Categoría'),
+                          const SizedBox(height: 12),
+                          campoTexto(
+                            _precio,
+                            'Precio',
+                            tipoTeclado: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          campoTexto(
+                            _existencias,
+                            'Existencias',
+                            tipoTeclado: TextInputType.number,
+                          ),
+                          const SizedBox(height: 12),
+                          DropdownButtonFormField<String>(
+                            initialValue: edicion[_activo] == 'Activo'
+                                ? 'Activo'
+                                : 'Inactivo',
+                            decoration: const InputDecoration(
+                              labelText: 'Estado',
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'Activo',
+                                child: Text('Activo'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'Inactivo',
+                                child: Text('Inactivo'),
+                              ),
+                            ],
+                            onChanged: (valor) {
+                              if (valor != null) {
+                                actualizarDialogo(() {
+                                  edicion[_activo] = valor;
+                                });
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton.icon(
+                  onPressed: () async {
+                    final guardado = await guardarEdicion(
+                      ediciones[paginaActual],
+                    );
+                    if (!guardado || !mounted) return;
+
+                    if (paginaActual < ediciones.length - 1) {
+                      final siguiente = paginaActual + 1;
+                      actualizarDialogo(() => paginaActual = siguiente);
+                      await pageController.nextPage(
+                        duration: const Duration(milliseconds: 250),
+                        curve: Curves.easeInOut,
+                      );
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Producto guardado. Continúa con el producto ${siguiente + 1}.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+
+                    if (!dialogContext.mounted) return;
+                    Navigator.of(dialogContext).pop();
+                    await _cargarProductos();
+                    if (!mounted) return;
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('Productos actualizados correctamente.'),
+                      ),
+                    );
+                  },
+                  icon: Icon(
+                    paginaActual < ediciones.length - 1
+                        ? Icons.arrow_forward
+                        : Icons.save,
+                  ),
+                  label: Text(
+                    paginaActual < ediciones.length - 1
+                        ? 'Guardar y siguiente'
+                        : 'Guardar y cerrar',
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    ).whenComplete(pageController.dispose);
+  }
+
   Future<void> _guardarCambios() async {
     final stateManagersVentas = [
       _stateManagerSnack,
@@ -670,9 +1083,9 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
     final filtro = consulta.isEmpty
         ? null
         : (PlutoRow fila) {
-            final nombre = fila.cells[_nombre]!.value.toString().toLowerCase();
-            final codigo = fila.cells[_codigo]!.value.toString().toLowerCase();
-            return nombre.contains(consulta) || codigo.contains(consulta);
+            final nombre = fila.cells[_nombre]?.value.toString().toLowerCase();
+            final codigo = fila.cells[_codigo]?.value.toString().toLowerCase();
+            return (nombre?.contains(consulta) ?? false) || (codigo?.contains(consulta) ?? false);
           };
 
     _stateManagerSnack?.setFilter(filtro);
@@ -726,6 +1139,31 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
         999,
       );
     });
+    _guardarRangoFechas();
+    _actualizarFilas();
+  }
+
+void _seleccionarFechaHoy(){
+    setState(() {
+      final ahora = DateTime.now();
+      _fechaDesde = DateTime(ahora.year, ahora.month, ahora.day, 0, 0);
+      _fechaHasta = DateTime(ahora.year, ahora.month, ahora.day, 23, 59, 59, 999);
+    });
+    _guardarRangoFechas();
+    _actualizarFilas();
+  }
+
+  void _seleccionarHorario(String periodo) {
+    final ahora = DateTime.now();
+    final rango = _horarios[periodo];
+    if (rango == null) return;
+    final partesDesde = rango[0].split(':');
+    final partesHasta = rango[1].split(':');
+    setState(() {
+      _fechaDesde = DateTime(ahora.year, ahora.month, ahora.day, int.parse(partesDesde[0]), int.parse(partesDesde[1]));
+      _fechaHasta = DateTime(ahora.year, ahora.month, ahora.day, int.parse(partesHasta[0]), int.parse(partesHasta[1]), 59, 999);
+    });
+    _guardarRangoFechas();
     _actualizarFilas();
   }
 
@@ -781,6 +1219,7 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
       _fechaDesde = fechaDesde;
       _fechaHasta = fechaHasta;
     });
+    _guardarRangoFechas();
     _actualizarFilas();
   }
 
@@ -789,6 +1228,7 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
       _fechaDesde = null;
       _fechaHasta = null;
     });
+    _guardarRangoFechas();
     _actualizarFilas();
   }
 
@@ -881,22 +1321,42 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Scaffold(
-      floatingActionButton: Container(
-        padding: const EdgeInsets.all(8),
+      bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(45),
-          color: Colors.lightGreen,
+          color: Colors.white,
+          border: Border(
+            top: BorderSide(
+              color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.1),
+              width: 1,
+            ),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+
+        padding: const EdgeInsets.all(2),
+        child: Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            Text("Total", style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white)),
-            Text("\$${_total.toStringAsFixed(2)}", style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white)),
-          ]
-        )
+            ContenedorCantidad(etiqueta: 'Subtotal', subtotal: _subtotal),
+            ContenedorCantidad(etiqueta: 'Salida', subtotal: _salida),
+            ContenedorCantidad(etiqueta: 'Entrada', subtotal: _entrada),
+            ContenedorCantidad(etiqueta: 'Impuestos', subtotal: _impuestos),
+            ContenedorCantidad(etiqueta: 'Total', subtotal: _total),
+          ],
+        ),
       ),
+     
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(4),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -935,44 +1395,137 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
               ),
             ),
 
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                SizedBox(
-                  width: 200,
-                  child: TextField(
-                    controller: _busquedaController,
-                    decoration: const InputDecoration(
-                      labelText: 'Buscar producto',
-                      prefixIcon: Icon(Icons.search),
+            const Divider(height: 10, thickness: 3),
+            SizedBox(
+              width: double.infinity,
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.end,
+                runSpacing: 10,
+                children: [
+                    //Selector de fechas
+                               Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Fecha',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                            if (_fechaDesde != null)
+                  Tooltip(
+                    message: 'Limpiar filtro de fechas',
+                    child: IconButton(
+                      onPressed: _limpiarRangoFechas,
+                      icon: const Icon(Icons.clear),
                     ),
-                    onChanged: _aplicarBusqueda,
                   ),
+                        ],
+                      ),
+                      Row(
+                        spacing: 3,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: _seleccionarRangoFechas,
+                            icon: const Icon(Icons.date_range),
+                            label: Text(_textoRangoFechas()),
+                          ),
+                                                    Tooltip(
+                            message: 'Hoy',
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                padding: const EdgeInsets.all(0),
+                              ),
+                              onPressed: _seleccionarFechaHoy,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Icon(Icons.today),
+                                ],
+                              ),
+                            
+                            ),
+                       
+                      ),
+                    
+                        ],
+                   
+                  
                 ),
-                DropdownButton<int>(
-                  value: _sucursalSeleccionada,
-                  items: const [
-                    DropdownMenuItem(value: 1, child: Text('BODY 1')),
-                    DropdownMenuItem(value: 2, child: Text('BODY 2')),
-                  ],
-                  onChanged: (sucursal) {
-                    if (sucursal == null) return;
-                    setState(() => _sucursalSeleccionada = sucursal);
-                    _cargarProductos();
-                    obtenerSalidas();
-                  },
+  
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        mainAxisSize: MainAxisSize.min,
+                        spacing: 3,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: _seleccionarRangoHoras,
+                            icon: const Icon(Icons.access_time),
+                            label: Text(_textoRangoHoras()),
+                          ),
+                          Tooltip(
+                            message: 'Horario de la mañana',
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                padding: const EdgeInsets.all(0),
+                              ),
+                              onPressed: () => _seleccionarHorario("mañana"),
+                              child: Row(
+                              
+                                children: const [
+                                  Icon(Icons.wb_sunny_outlined),
+                                  Icon(Icons.sunny),
+                                ],
+                              ),
+                            
+                            ),
+                          ),
+                          Tooltip(
+                            message: 'Horario de la tarde',
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                padding: const EdgeInsets.all(0),
+                              ),
+                              onPressed: () => _seleccionarHorario("tarde"),
+                              child: Row(
+                                children: const [
+                                  Icon(Icons.sunny),
+                                  Icon(Icons.nightlight_round),
+                                ],
+                              ),
+                            
+                            ),
+                       
+                      ),
+                    ],),
+             ],
                 ),
-                Row(
+                
+                Column(
+                  spacing: 5,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+
+                children: [
+
+
+                                  Wrap(
                   spacing: 2,
-                  mainAxisSize: MainAxisSize.min,
+                  runSpacing: 2,
                   children: [
   
                Tooltip(
                   message: 'Guardar cambios',
-                  child: IconButton.filled(
+                  child: IconButton.filledTonal(
                     onPressed: () {
                       _guardarCambios();
                       setState(() {});
@@ -985,6 +1538,13 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
                   child: IconButton.filledTonal(
                     onPressed: _agregarProducto,
                     icon: const Icon(Icons.add),
+                  ),
+                ),
+                                Tooltip(
+                  message: 'Editar productos seleccionados',
+                  child: IconButton.filledTonal(
+                    onPressed: _editarSeleccionados,
+                    icon: const Icon(Icons.edit),
                   ),
                 ),
  
@@ -1019,117 +1579,77 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
                 ),
                                   ],
                 ),
-                                Container(
-                                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    spacing: 3,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.start,
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Text(
-                        'Fecha',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      Row(
-                        spacing: 3,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: _seleccionarRangoFechas,
-                            icon: const Icon(Icons.date_range),
-                            label: Text(_textoRangoFechas()),
-                          ),
-                                                    Tooltip(
-                            message: 'Hoy',
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue,
-                                padding: const EdgeInsets.all(0),
-                              ),
-                              onPressed: _seleccionarRangoHoras,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.swipe_down_alt_rounded),
-                                ],
-                              ),
-                            
-                            ),
-                       
-                      ),
-                    
-                        ],
-                   
-                  
-                ),
-  
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        spacing: 3,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: _seleccionarRangoHoras,
-                            icon: const Icon(Icons.access_time),
-                            label: Text(_textoRangoHoras()),
-                          ),
-                          Tooltip(
-                            message: 'Horario de la mañana',
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange,
-                                padding: const EdgeInsets.all(0),
-                                minimumSize: const Size(40, 40),
-                              ),
-                              onPressed: _seleccionarRangoHoras,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.wb_sunny_outlined),
-                                  Icon(Icons.sunny),
-                                ],
-                              ),
-                            
-                            ),
-                          ),
-                          Tooltip(
-                            message: 'Horario de la tarde',
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue,
-                                padding: const EdgeInsets.all(0),
-                                minimumSize: const Size(40, 40),
-                              ),
-                              onPressed: _seleccionarRangoHoras,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.sunny),
-                                  Icon(Icons.nightlight_round),
-                                ],
-                              ),
-                            
-                            ),
-                       
-                      ),
-                    ],),
-             ],
-                ),),
-                if (_fechaDesde != null)
-                  Tooltip(
-                    message: 'Limpiar filtro de fechas',
-                    child: IconButton(
-                      onPressed: _limpiarRangoFechas,
-                      icon: const Icon(Icons.clear),
+                SizedBox(
+                  width: 200,
+                  child: TextField(
+                    controller: _busquedaController,
+                    decoration: const InputDecoration(
+                      labelText: 'Buscar producto',
+                      prefixIcon: Icon(Icons.search),
                     ),
+                    onChanged: _aplicarBusqueda,
                   ),
+                ),
+
+                                Container(
+                                 
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Colors.grey),
+                                    borderRadius: BorderRadius.circular(45),
+                                    
+                                  ),
+                                  child: DropdownButton<int>(
+                                    style: TextStyle(color: Colors.black
+                                
+                                    ),
+                                    focusColor: Colors.transparent,
+                                    enableFeedback: false,
+                                    borderRadius: BorderRadius.circular(30),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                                                    value: _sucursalSeleccionada,
+                                                    items: const [
+                                                      DropdownMenuItem(value: 1, child: Text('BODY 1')),
+                                                      DropdownMenuItem(value: 2, child: Text('BODY 2')),
+                                                    ],
+                                                    onChanged: (sucursal) {
+                                                      if (sucursal == null) return;
+                                                      setState(() => _sucursalSeleccionada = sucursal);
+                                                      _cargarProductos();
+                                                      obtenerSalidas();
+                                                    },
+                                                  ),
+                                ),
+                ],
+              ),
+
+
+
+
+                ],
+                ),
+
+
+              
               ],
             ),
-            const SizedBox(height: 16),
+            ),
+            const SizedBox(height: 10),
+           Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.5),
+                  spreadRadius: 1,
+                  blurRadius: 3,
+                  offset: const Offset(0, 1),
+                ),
+              ],
+            ),
+           ),
             Expanded(
               child: _cargando
                   ? const Center(child: CircularProgressIndicator())
@@ -1138,9 +1658,9 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
                       child: Text('Error al cargar el inventario: $_error'),
                     )
                   : SingleChildScrollView(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 1200),
-                        child: Padding(
+             
+                        child: Container(
+                          alignment: Alignment.center,
                           padding: const EdgeInsets.all(20),
                           child: Wrap(
                             spacing: 4,
@@ -1158,6 +1678,7 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
                                   scrollDirection: Axis.horizontal,
                                   physics: const ClampingScrollPhysics(),
                                   child: Row(
+                                    spacing: 4,
                                     mainAxisAlignment: MainAxisAlignment.start,
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
@@ -1188,6 +1709,7 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
                                   scrollDirection: Axis.horizontal,
                                   physics: const ClampingScrollPhysics(),
                                   child: Row(
+                                    spacing: 4,
                                     mainAxisAlignment: MainAxisAlignment.start,
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
@@ -1229,7 +1751,7 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
           
                       
               )   ),
-        ),
+        
       ),]
        ),
        ), 
@@ -1238,7 +1760,39 @@ class _InventarioPlutoGridState extends State<InventarioPlutoGrid> {
 
     
   }
+
+
 }
+
+class ContenedorCantidad extends StatelessWidget {
+  const ContenedorCantidad({
+    super.key,
+    required String etiqueta,
+    required double subtotal,
+  }) : _etiqueta = etiqueta,
+       _subtotal = subtotal;
+
+  final String _etiqueta;
+  final double _subtotal;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(
+            color: const Color.fromARGB(255, 34, 0, 251),
+            width: 3,
+          ),
+        ),
+
+      ),
+      child: Text("$_etiqueta: \$${_subtotal.toStringAsFixed(2)}", style: Theme.of(context).textTheme.titleMedium));
+  }
+}
+
+
 
 Future<TimeOfDay?> _selectorDeHora(BuildContext context, String titulo, DateTime fechaDesdeActual, Map<String,TimeOfDay> horasPredefinidas,) {
   return showDialog<TimeOfDay>(

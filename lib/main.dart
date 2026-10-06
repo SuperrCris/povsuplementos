@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:pov_suplementos/estructuras/objeto.dart';
@@ -16,7 +18,8 @@ import 'package:pov_suplementos/widgets/inventario_plutogrid.dart';
 import 'package:pov_suplementos/widgets/ventanacompra.dart';
 import 'package:pov_suplementos/widgets/ventanareportes.dart';
 import 'package:pov_suplementos/widgets/ventanaterminalpago.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import 'package:pov_suplementos/widgets/botonMaterial.dart';
 
 // Importaciones del sistema de autenticación
 import 'package:pov_suplementos/auth/gestorsesion.dart';
@@ -25,7 +28,6 @@ import 'package:pov_suplementos/auth/BD_semillero.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  sqfliteFfiInit();
   await Basededatos.database;
   await DBSemillero.crearUsuariosDefecto();
 
@@ -181,7 +183,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool enLinea = false;
-  Database? db;
+
 
   final CarritoControlador _carritoController = CarritoControlador();
   final GlobalKey<RefreshIndicatorState> _refreshKey =
@@ -259,13 +261,28 @@ class _HomeScreenState extends State<HomeScreen> {
         existencias: producto['existencias'],
         activo: producto['activo'] == 1 ? true : false,
       );
-      for (var imageFile in images) {
-        final nombreImagen = producto['imagen']?.toString().trim() ?? '';
-        if (nombreImagen.isNotEmpty && imageFile.path.contains(nombreImagen)) {
-          objetoactual.imagenWidget = Image.file(imageFile, fit: BoxFit.cover);
-          break;
+      final nombreImagen = producto['imagen']?.toString().trim() ?? '';
+      if (nombreImagen.isNotEmpty) {
+        final imagenGuardada = await GestorImagenes.obtenerImageProvider(
+          nombreImagen,
+        );
+        if (imagenGuardada != null) {
+          objetoactual.imagenWidget = Image(
+            image: imagenGuardada,
+            fit: BoxFit.cover,
+          );
         } else {
-          print("no hubo imagen para el objeto: ${producto['productoNombre']}");
+          for (var imageFile in images) {
+            if (imageFile.path.toLowerCase().endsWith(
+              nombreImagen.toLowerCase(),
+            )) {
+              objetoactual.imagenWidget = Image.file(
+                imageFile,
+                fit: BoxFit.cover,
+              );
+              break;
+            }
+          }
         }
       }
       print(
@@ -310,53 +327,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _botonSuperior({
-    required String texto,
-    required VoidCallback onPressed,
-    required List<Color> colores,
-    required List<Color> coloresHover,
-  }) {
-    var estaSobreElBoton = false;
 
-    return StatefulBuilder(
-      builder: (context, setStateLocal) {
-        return ElevatedButton(
-          onPressed: onPressed,
-          onHover: (hovered) {
-            setStateLocal(() => estaSobreElBoton = hovered);
-          },
-          style: ElevatedButton.styleFrom(
-            padding: EdgeInsets.zero,
-            elevation: 0,
-            backgroundColor: Colors.transparent,
-            shadowColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(45),
-            ),
-          ),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(45),
-              gradient: LinearGradient(
-                colors: estaSobreElBoton ? coloresHover : colores,
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-            ),
-            child: Text(
-              texto,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
 
   SliverGrid _rejillaProductos(
     BuildContext context,
@@ -392,12 +363,70 @@ class _HomeScreenState extends State<HomeScreen> {
     final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: isDark ? theme.scaffoldBackgroundColor : const Color.fromARGB(255, 242, 254, 255),
+          border: Border(
+            top: BorderSide(
+              color: isDark ? const Color.fromARGB(255, 21, 21, 21) : Colors.grey.shade300,
+              width: 3,
+            ),
+          ),
+        ),
+        height: 50,
+        child: Row(
+          spacing: 8.0,
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            SizedBox(width: 8),
+              BotonNavegacion(
+              alAccionar: () { _mostrarDialogoAgregarSalidas(context); },
+              gradiente: LinearGradient(
+                colors: isDark
+                    ? [const Color.fromARGB(255, 192, 35, 21), const Color.fromARGB(255, 161, 134, 13)]
+                    : [const Color.fromARGB(255, 185, 22, 7), const Color.fromARGB(255, 167, 0, 161)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+              icono: Icons.money_off,
+              texto: "Agregar salida",
+            ),
+            BotonNavegacion(
+              alAccionar: () {},
+              gradiente: LinearGradient(
+                colors: isDark
+                    ? [Colors.blue.shade800, Colors.blue.shade900]
+                    : [const Color.fromARGB(255, 7, 185, 126), const Color.fromARGB(255, 39, 155, 176)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+              icono: Icons.receipt,
+              texto: "Facturación",
+            ),
+            BotonNavegacion(
+              
+              alAccionar: () {},
+               gradiente: LinearGradient(
+                colors: isDark
+                    ? [const Color.fromARGB(255, 141, 21, 192), const Color.fromARGB(255, 9, 94, 105)]
+                    : [const Color.fromARGB(255, 205, 33, 243), const Color.fromARGB(255, 39, 155, 176)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+              icono: Icons.reply,
+              texto: "Reembolsar",
+            ),
+            
+          ],
+        ),
+      ),
       backgroundColor: isDark
           ? theme.scaffoldBackgroundColor
           : const Color.fromARGB(255, 242, 254, 255),
       body: Column(
         children: [
-          Container(
+          //Barra superior  
+                    Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: isDark
@@ -459,46 +488,44 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(8.0),
+                        padding: const EdgeInsets.all(2),
                         alignment: Alignment.topLeft,
                         child: Wrap(
                           crossAxisAlignment: WrapCrossAlignment.start,
                           alignment: WrapAlignment.start,
                           direction: Axis.horizontal,
-                          spacing: 10,
-                          runSpacing: 10,
+                          spacing: 2,
                           children: [
-                            _botonSuperior(
+                            BotonNavegacion(
                               texto: '📄 Inventario',
-                              colores: const [
-                                Color.fromARGB(255, 1, 204, 45),
-                                Color.fromARGB(255, 23, 161, 57),
-                              ],
-                              coloresHover: const [
-                                Color.fromARGB(255, 36, 224, 77),
-                                Color.fromARGB(255, 34, 188, 70),
-                              ],
-                              onPressed: () {
-                                Navigator.push(
+                              gradiente:  LinearGradient(
+                                colors: [
+                                  Color.fromARGB(255, 1, 204, 45),
+                                  Color.fromARGB(255, 23, 161, 57),
+                                ],
+                              ),
+                              alAccionar: () async {
+                                await Navigator.push(
                                   context,
                                   MaterialPageRoute(
                                     builder: (context) => InventarioPlutoGrid(),
                                   ),
                                 );
+                                if (!mounted) return;
+                                await _actualizarTablaProductos();
                               },
                             ),
 
-                            _botonSuperior(
+                            BotonNavegacion(
                               texto: '📖 Reporte',
-                              colores: const [
-                                Color.fromARGB(255, 255, 158, 32),
-                                Color.fromARGB(255, 245, 140, 3),
-                              ],
-                              coloresHover: const [
-                                Color.fromARGB(255, 255, 181, 67),
-                                Color.fromARGB(255, 255, 160, 24),
-                              ],
-                              onPressed: () {
+                              gradiente:  LinearGradient(
+                                colors: [
+                                  Color.fromARGB(255, 255, 158, 32),
+                                  Color.fromARGB(255, 245, 140, 3),
+                                ],
+                              ),
+
+                              alAccionar: () {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
@@ -509,27 +536,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 );
                               },
                             ),
-                            _botonSuperior(
-                              texto: '+',
-                              colores: const [
-                                Color(0xFF0F0CDA),
-                                Color(0xFF1720A1),
-                              ],
-                              coloresHover: const [
-                                Color(0xFF514EFF),
-                                Color(0xFF5661D9),
-                              ],
-                              onPressed: () {
-                                showDialog(
-                                  context: context,
-                                  builder: (context) => agregarSalidas(
-                                    alTenerExito: () {
-                                      _actualizarTablaProductos();
-                                    },
-                                  ),
-                                );
-                              },
-                            ),
+
                           ],
                         ),
                       ),
@@ -734,4 +741,14 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+  Future<void> _mostrarDialogoAgregarSalidas(BuildContext context) async {
+  showDialog(
+    context: context,
+    builder: (context) => agregarSalidas(
+      alTenerExito: () {
+        _actualizarTablaProductos();
+      },
+    ),
+  );
+}
 }

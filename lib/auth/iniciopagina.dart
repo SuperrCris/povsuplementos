@@ -167,8 +167,16 @@ class _IniciopaginaState extends State<Iniciopagina> with SingleTickerProviderSt
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _cabecera(theme),
-                    SizedBox(height: 32),
+                    Text(
+                      'SUPLEMENTOS BEG',
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: theme.primaryColor,
+                        fontSize: 24,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 32),
                     _txfUsuario(),
                     const SizedBox(height: 16),
                     _txfContrasena(),
@@ -213,7 +221,7 @@ class _IniciopaginaState extends State<Iniciopagina> with SingleTickerProviderSt
             color: Colors.white,
           ),
         ),
-        SizedBox(height:  16),
+        const SizedBox(height:  16),
         Text(
           'Suplementos BEG',
           style: theme.textTheme.headlineMedium?.copyWith(
@@ -222,7 +230,7 @@ class _IniciopaginaState extends State<Iniciopagina> with SingleTickerProviderSt
             fontSize: 24,
           ),
         ),
-        SizedBox(height:8),
+        const SizedBox(height:8),
       ],
     );
   }

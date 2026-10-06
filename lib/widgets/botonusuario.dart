@@ -1,6 +1,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:pov_suplementos/auth/autenticacion.dart';
+import 'package:pov_suplementos/widgets/gestionusuarios.dart';
 
 
 class BotonUsuario extends StatefulWidget {
@@ -81,7 +82,12 @@ class _BotonUsuarioState extends State<BotonUsuario> {
                     title: 'Gestionar Usuarios',
                     onTap: () {
                       Navigator.pop(context);
-                      _showUsersDialog(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const GestionUsuarios(),
+                        ),
+                      );
                     },
                   ),
                 ],
@@ -399,21 +405,6 @@ class _BotonUsuarioState extends State<BotonUsuario> {
   }
 
 
-  void _showUsersDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Gestión de Usuarios'),
-        content: const Text('Función en desarrollo...'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cerrar'),
-          ),
-        ],
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {

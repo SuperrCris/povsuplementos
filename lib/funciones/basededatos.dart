@@ -568,6 +568,25 @@ class Basededatos {
     });
   }
 
+  /// Obtiene los usuarios para las pantallas de gestión, sin exponer contraseñas.
+  static Future<List<Map<String, dynamic>>> obtenerUsuarios() async {
+    final db = await database;
+
+    try {
+      final resultado = await db.query(
+        'usuarios',
+        columns: ['id', 'nombre', 'rol', 'ultimo_acceso', 'activo'],
+        orderBy: 'nombre ASC',
+      );
+
+      return resultado
+          .map((usuario) => Map<String, dynamic>.from(usuario))
+          .toList();
+    } catch (e) {
+      return <Map<String, dynamic>>[];
+    }
+  }
+
   /// Obtiene todos los usuarios (solo para administradores)
   static Future<Map<String, dynamic>> obtenerTodosLosUsuarios() async {
     final db = await database;
@@ -762,6 +781,8 @@ class Basededatos {
           v.codigo AS ventaCodigo,
           v.fecha,
           v.total,
+          v.subtotal,
+          v.impuesto,
           v.metodo_pago,
           u.nombre AS usuarioNombre,
           COALESCE(
@@ -773,7 +794,8 @@ class Basededatos {
         LEFT JOIN productos p ON p.codigo = vo.productoCodigo
         LEFT JOIN usuarios u ON u.id = v.usuario_id
         ${condiciones.isEmpty ? '' : 'WHERE ${condiciones.join(' AND ')}'}
-        GROUP BY v.codigo, v.fecha, v.total, v.metodo_pago, u.nombre
+        GROUP BY v.codigo, v.fecha, v.total, v.subtotal, v.impuesto,
+          v.metodo_pago, u.nombre
         ORDER BY v.codigo DESC
       ''', argumentos);
 
@@ -1291,6 +1313,10 @@ class Basededatos {
               'concepto': venta['productosVendidos'] ?? 'Venta',
               'cantidad': null,
               'monto': (venta['total'] as num?)?.toDouble() ?? 0.0,
+                'subtotal': (venta['subtotal'] as num?)?.toDouble() ??
+                  (venta['total'] as num?)?.toDouble() ??
+                  0.0,
+                'impuesto': (venta['impuesto'] as num?)?.toDouble() ?? 0.0,
               'fecha': venta['fecha'],
               'metodo_pago': venta['metodo_pago'],
               'usuarioNombre': venta['usuarioNombre'],
@@ -1309,6 +1335,8 @@ class Basededatos {
             'concepto': salida['concepto'],
             'cantidad': null,
             'monto': (salida['monto'] as num?)?.toDouble() ?? 0.0,
+            'subtotal': 0.0,
+            'impuesto': 0.0,
             'fecha': salida['fecha'],
             'metodo_pago': salida['metodo_pago'],
             'usuarioNombre': salida['usuarioNombre'],
